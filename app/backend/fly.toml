@@ -8,6 +8,9 @@
 app = 'grubr-api'
 primary_region = 'iad'
 
+[env]
+  DEMO_MAX_RESTAURANTS = '3'
+
 [build]
   dockerfile = 'Dockerfile'
 

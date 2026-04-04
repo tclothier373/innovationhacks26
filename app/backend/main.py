@@ -43,6 +43,16 @@ def _load_root_env() -> None:
 
 _load_root_env()
 
+
+def _demo_max_restaurants() -> int:
+    """Cap Places → client rows and menu-proposals batch size (free-tier / demo safety)."""
+    try:
+        n = int(os.getenv("DEMO_MAX_RESTAURANTS", "3").strip() or "3")
+    except ValueError:
+        n = 3
+    return max(1, min(n, 12))
+
+
 # Places REST API requires a Maps Platform key with "Places API" (or legacy) enabled.
 # This is NOT the same as a Gemini / AI Studio-only key (AIza... for generative language).
 PLACES_API_KEY = (
@@ -91,28 +101,6 @@ def fallback_enrich(place: dict) -> dict:
     }
 
 
-def _enrich_prompt(place: dict) -> str:
-    return f"""
-    Given this restaurant:
-
-    Name: {place.get("name")}
-    Types: {place.get("types")}
-    Price level: {place.get("price_level", "unknown")}
-
-    Infer:
-    - cuisine
-    - main food item
-    - price range (cheap/moderate/expensive)
-
-    Return ONLY JSON:
-    {{
-      "cuisine": "",
-      "main_food": "",
-      "price_range": ""
-    }}
-    """
-
-
 def _parse_json_from_model(text: str) -> dict:
     raw = (text or "").strip()
     if not raw:
@@ -126,26 +114,82 @@ def _parse_json_from_model(text: str) -> dict:
 
 
 def enrich_restaurant(place: dict) -> dict:
-    prompt = _enrich_prompt(place)
+    """Single-place enrich; prefer `enrich_restaurants_batch` for multiple venues (one LLM call)."""
+    got = enrich_restaurants_batch([place])
+    return got[0] if got else fallback_enrich(place)
+
+
+def enrich_restaurants_batch(places: list[dict]) -> list[dict]:
+    """One Gemini/Vertex JSON call for all places — avoids N× rate limits on /restaurants."""
+    n = len(places)
+    if n == 0:
+        return []
+    if _genai_model is None and _vertex_model is None:
+        return [fallback_enrich(p) for p in places]
+
+    rows: list[dict[str, Any]] = []
+    for i, p in enumerate(places):
+        rows.append(
+            {
+                "index": i,
+                "name": p.get("name"),
+                "types": p.get("types"),
+                "price_level": p.get("price_level", "unknown"),
+            }
+        )
+
+    prompt = f"""For each restaurant in the JSON array below (fixed order), infer:
+- cuisine (short label)
+- main_food (one plausible popular dish name)
+- price_range: one of cheap, moderate, expensive
+
+Restaurants:
+{json.dumps(rows, ensure_ascii=False)}
+
+Return ONLY valid JSON:
+{{
+  "items": [
+    {{ "cuisine": "", "main_food": "", "price_range": "" }}
+  ]
+}}
+The "items" array must have exactly {n} objects in the same order as the input.
+"""
+
+    parsed: Optional[dict] = None
     if _genai_model is not None:
         try:
             r = _genai_model.generate_content(
                 prompt,
                 generation_config={"response_mime_type": "application/json"},
             )
-            return _parse_json_from_model(getattr(r, "text", "") or "")
+            parsed = _parse_json_from_model(getattr(r, "text", "") or "")
         except Exception:
-            pass
-    if _vertex_model is not None:
+            parsed = None
+    if parsed is None and _vertex_model is not None:
         try:
             response = _vertex_model.generate_content(
                 prompt,
                 generation_config={"response_mime_type": "application/json"},
             )
-            return _parse_json_from_model(getattr(response, "text", "") or "")
+            parsed = _parse_json_from_model(getattr(response, "text", "") or "")
         except Exception:
-            pass
-    return fallback_enrich(place)
+            parsed = None
+
+    items = parsed.get("items") if isinstance(parsed, dict) else None
+    out: list[dict] = []
+    for i in range(n):
+        fb = fallback_enrich(places[i])
+        cell: dict[str, Any] = {}
+        if isinstance(items, list) and i < len(items) and isinstance(items[i], dict):
+            cell = items[i]
+        out.append(
+            {
+                "cuisine": (cell.get("cuisine") or fb["cuisine"] or "Restaurant"),
+                "main_food": (cell.get("main_food") or fb["main_food"] or "Popular house dish"),
+                "price_range": (cell.get("price_range") or fb["price_range"] or "moderate"),
+            }
+        )
+    return out
 
 
 def get_restaurants_text_search(query: str, api_key: str) -> tuple[list, str, Optional[str]]:
@@ -182,7 +226,12 @@ def get_restaurants_nearby(
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "demo_max_restaurants": _demo_max_restaurants(),
+        "grubhub_scraper_enabled": os.getenv("ENABLE_GRUBHUB_SCRAPER", "").lower()
+        in ("1", "true", "yes"),
+    }
 
 
 @app.get("/restaurants")
@@ -220,10 +269,12 @@ def get_restaurant_data(
             "hint": "Places API rejected this key. Use a key from Google Cloud Console with 'Places API' enabled (Maps Platform). A Gemini-only / AI Studio key will not work for Places.",
         }
 
-    results: list[dict[str, Any]] = []
+    max_n = _demo_max_restaurants()
+    selected = places[:max_n]
+    enrichments = enrich_restaurants_batch(selected)
 
-    for p in places[:8]:
-        ai_data = enrich_restaurant(p)
+    results: list[dict[str, Any]] = []
+    for p, ai_data in zip(selected, enrichments):
         results.append(
             {
                 "place_id": p.get("place_id"),
@@ -240,7 +291,11 @@ def get_restaurant_data(
             }
         )
 
-    out: dict[str, Any] = {"data": results, "places_status": places_status}
+    out: dict[str, Any] = {
+        "data": results,
+        "places_status": places_status,
+        "demo_restaurant_limit": max_n,
+    }
     if not results and places_status == "ZERO_RESULTS":
         out["error"] = "No restaurants matched this search (ZERO_RESULTS)."
     return out
@@ -248,7 +303,8 @@ def get_restaurant_data(
 
 def _slim_for_menu_prompt(restaurants: list) -> list[dict[str, Any]]:
     slim: list[dict[str, Any]] = []
-    for i, r in enumerate(restaurants[:8]):
+    cap = _demo_max_restaurants()
+    for i, r in enumerate(restaurants[:cap]):
         if not isinstance(r, dict):
             continue
         slim.append(
