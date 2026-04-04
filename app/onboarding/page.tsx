@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { GrubrHeader } from "@/components/grubr-header";
 import { agentTransitionHref } from "@/lib/agent-transition";
 import { saveProfile, type GrubrProfile } from "@/lib/grubr-storage";
+import Image from "next/image";
+
 
 const DIETARY_OPTIONS = [
   { label: "No restrictions", value: "None", icon: "✨" },
@@ -94,7 +96,16 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="relative flex min-h-screen flex-col overflow-hidden">
+      <Image
+        src="/food-bg.png"
+        alt="Food background"
+        fill
+        priority
+        className="object-cover object-center"
+      />
+      <div className="absolute inset-0 bg-black/25" />
+      <div className="relative z-10 flex flex-1 flex-col">
       <GrubrHeader />
 
       <main className="flex flex-1 items-start justify-center px-4 py-5 md:items-center">
@@ -146,7 +157,7 @@ export default function OnboardingPage() {
           </div>
 
           {/* Card */}
-          <div className="overflow-hidden rounded-3xl border border-white/15 bg-white/10 backdrop-blur-xl shadow-2xl shadow-black/20">
+          <div className="overflow-hidden rounded-3xl border border-white/15 bg-brand/100 shadow-2xl shadow-black/20">
             <form onSubmit={handleSubmit}>
               <AnimatePresence mode="wait">
 
@@ -394,6 +405,7 @@ export default function OnboardingPage() {
 
         </div>
       </main>
+      </div>
     </div>
   );
 }
