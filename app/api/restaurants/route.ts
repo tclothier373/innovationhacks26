@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { GrubrProfile } from "@/lib/grubr-storage";
 import { buildPlacesSearchQuery } from "@/lib/places-bridge";
 
-const DEFAULT_BACKEND = "http://127.0.0.1:8000";
+const DEFAULT_BACKEND = "https://nonvertebral-winter-pronunciative.ngrok-free.dev/restaurants?query=cheap+food+tempe";
 
 export async function POST(req: NextRequest) {
   let body: { profile?: GrubrProfile | null; contextPrompt?: string };
