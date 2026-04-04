@@ -385,6 +385,9 @@ export default function SwipingPage() {
         if (Array.isArray(rows) && rows.length > 0) {
           const built = await fetchPlacesWithProposedMenus(
             rows as PlacesApiRestaurantRow[],
+            {
+              prototypeGrubhubUrls: prof?.prototypeGrubhubUrls,
+            },
           );
           if (!cancelled) {
             setDynamicRestaurants(built);
@@ -466,6 +469,9 @@ export default function SwipingPage() {
       if (Array.isArray(rows) && rows.length > 0) {
         const built = await fetchPlacesWithProposedMenus(
           rows as PlacesApiRestaurantRow[],
+          {
+            prototypeGrubhubUrls: getProfile()?.prototypeGrubhubUrls,
+          },
         );
         setDynamicRestaurants(built);
         setPlacesStatus("ready");

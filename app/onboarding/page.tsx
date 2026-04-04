@@ -31,6 +31,7 @@ export default function OnboardingPage() {
   const [location, setLocation] = useState<GrubrProfile["location"]>(null);
   const [locStatus, setLocStatus] = useState<"idle" | "loading" | "ok" | "err">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [prototypeGrubhubUrlsText, setPrototypeGrubhubUrlsText] = useState("");
 
   function toggleDietary(option: string) {
     if (option === "None") { setDietary(["None"]); return; }
@@ -67,12 +68,19 @@ export default function OnboardingPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const prototypeGrubhubUrls = prototypeGrubhubUrlsText
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s.includes("grubhub.com"));
     const profile: GrubrProfile = {
       dietaryRestrictions: dietary.filter((d) => d !== "None"),
       favoriteFood: favoriteFood.trim() || "Everything",
       radiusMiles,
       priceLevel,
       location,
+      ...(prototypeGrubhubUrls.length
+        ? { prototypeGrubhubUrls }
+        : {}),
     };
     saveProfile(profile);
     router.push(agentTransitionHref("/swiping", "after_onboarding"));
@@ -319,6 +327,26 @@ export default function OnboardingPage() {
                       onChange={(e) => setFavoriteFood(e.target.value)}
                       placeholder="e.g. spicy ramen, crispy tacos, sushi…"
                       className="mt-2 w-full rounded-xl border border-white/20 bg-white px-4 py-3 text-sm font-medium text-i0 shadow-inner placeholder:text-i3 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    />
+
+                    <label
+                      htmlFor="demo-grubhub-urls"
+                      className="mt-5 block text-xs font-semibold uppercase tracking-wider text-white/55"
+                    >
+                      Demo: Grubhub menu URLs (optional)
+                    </label>
+                    <p className="mt-1 text-[11px] leading-snug text-white/45">
+                      Optional override: one URL per line or comma-separated, index-aligned with Places
+                      results. If you leave this blank and the backend has scraping + Gemini enabled,
+                      it will try to infer Grubhub links from names automatically (demo only).
+                    </p>
+                    <textarea
+                      id="demo-grubhub-urls"
+                      value={prototypeGrubhubUrlsText}
+                      onChange={(e) => setPrototypeGrubhubUrlsText(e.target.value)}
+                      placeholder="https://www.grubhub.com/restaurant/…"
+                      rows={3}
+                      className="mt-2 w-full resize-y rounded-xl border border-white/20 bg-white/95 px-3 py-2 text-xs font-medium text-i0 shadow-inner placeholder:text-i3 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
                     />
 
                     {/* Preview summary */}

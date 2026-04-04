@@ -2,6 +2,8 @@
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
+# Optional prototype Grubhub scrape: ENABLE_GRUBHUB_SCRAPER=true (+ GEMINI_API_KEY for URL inference).
+# Set DISABLE_GEMINI_GRUBHUB_URL_LOOKUP=true to skip Gemini → Grubhub URL step. Chrome still required to scrape.
 
 app = 'grubr-api'
 primary_region = 'iad'

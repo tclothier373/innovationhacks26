@@ -1,16 +1,14 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-import requests
 import json
 import os
+import re
+import time
 from pathlib import Path
 from typing import Any, Optional
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-import os
-import time
-import json
+
+import requests
+from starlette.concurrency import run_in_threadpool
 
 app = FastAPI()
 
@@ -234,6 +232,8 @@ def get_restaurant_data(
                 "user_ratings_total": p.get("user_ratings_total"),
                 "price_level": p.get("price_level"),
                 "types": p.get("types"),
+                "vicinity": p.get("vicinity"),
+                "formatted_address": p.get("formatted_address"),
                 "cuisine": ai_data.get("cuisine"),
                 "main_food": ai_data.get("main_food"),
                 "price_range": ai_data.get("price_range"),
@@ -258,6 +258,8 @@ def _slim_for_menu_prompt(restaurants: list) -> list[dict[str, Any]]:
                 "name": r.get("name") or "Restaurant",
                 "cuisine": r.get("cuisine"),
                 "main_food": r.get("main_food"),
+                "vicinity": r.get("vicinity"),
+                "formatted_address": r.get("formatted_address"),
             }
         )
     return slim
@@ -371,6 +373,280 @@ Each inner array must have 3 to 5 items.
     return None
 
 
+_GRUBHUB_URL_RE = re.compile(
+    r"https?://(?:www\.)?grubhub\.com/restaurant/[^\s\"'<>)\]]+",
+    re.IGNORECASE,
+)
+
+
+def _normalize_grubhub_url(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    m = _GRUBHUB_URL_RE.search(s)
+    if not m:
+        return None
+    url = m.group(0).rstrip(".,);'\"")
+    if "?" in url:
+        url = url.split("?", 1)[0]
+    return url if url.lower().startswith("http") else None
+
+
+def _llm_grubhub_urls_batch(slim: list[dict[str, Any]]) -> list[Optional[str]]:
+    """Ask Gemini/Vertex for Grubhub listing URLs; validate shape. Prototype / demo use."""
+    if not slim:
+        return []
+    n = len(slim)
+    if _genai_model is None and _vertex_model is None:
+        return [None] * n
+
+    prompt = f"""You map restaurants from a discovery app to official Grubhub restaurant menu page URLs.
+
+Input (JSON array, fixed order — each entry may include name, cuisine, vicinity or formatted_address from Google Places):
+{json.dumps(slim, ensure_ascii=False)}
+
+Task:
+- For EACH entry in the same order, output the best matching **Grubhub** menu URL if you can determine it with high confidence (e.g. unambiguous national/regional chain with a well-known Grubhub slug).
+- Use **vicinity** or **formatted_address** to disambiguate when the same brand appears in different cities.
+- If the venue is independent, ambiguous, or you are not sure of the exact `/restaurant/...` path on grubhub.com, use null.
+- **Never** guess random numeric IDs or invent paths — prefer null.
+
+Return ONLY valid JSON:
+{{
+  "urls": [ "https://www.grubhub.com/restaurant/..." or null ]
+}}
+The array **urls** must have exactly {n} elements in the same order as the input array.
+"""
+
+    parsed: Optional[dict] = None
+    if _genai_model is not None:
+        try:
+            r = _genai_model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+            )
+            parsed = _parse_json_from_model(getattr(r, "text", "") or "")
+        except Exception:
+            parsed = None
+    if parsed is None and _vertex_model is not None:
+        try:
+            response = _vertex_model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+            )
+            parsed = _parse_json_from_model(getattr(response, "text", "") or "")
+        except Exception:
+            parsed = None
+
+    if not isinstance(parsed, dict):
+        return [None] * n
+    raw_list = parsed.get("urls")
+    if not isinstance(raw_list, list):
+        return [None] * n
+
+    out: list[Optional[str]] = []
+    for i in range(n):
+        cell = raw_list[i] if i < len(raw_list) else None
+        out.append(_normalize_grubhub_url(cell))
+    return out
+
+
+def _resolve_grubhub_urls(
+    restaurants: list[Any], n: int, payload: dict[str, Any]
+) -> list[Optional[str]]:
+    top = payload.get("prototypeGrubhubUrls") or payload.get("prototype_grubhub_urls")
+    top_list: list[str] = []
+    if isinstance(top, list):
+        top_list = [str(x).strip() for x in top if str(x).strip()]
+    env_raw = os.getenv("GRUBHUB_PROTOTYPE_URLS", "").strip()
+    env_list = [x.strip() for x in env_raw.split(",") if x.strip()]
+
+    out: list[Optional[str]] = []
+    for i in range(n):
+        u: Optional[str] = None
+        r = restaurants[i] if i < len(restaurants) else None
+        if isinstance(r, dict):
+            v = r.get("grubhub_url") or r.get("grubhubUrl")
+            if isinstance(v, str) and v.strip():
+                u = v.strip()
+        if not u and i < len(top_list):
+            u = top_list[i]
+        if not u and i < len(env_list):
+            u = env_list[i]
+        out.append(u)
+    return out
+
+
+def _resolve_scrape_urls_with_gemini(
+    restaurants: list[Any],
+    n: int,
+    payload: dict[str, Any],
+    slim: list[dict[str, Any]],
+) -> list[Optional[str]]:
+    """Manual/env URLs first; then Gemini fills missing slots (when lookup enabled)."""
+    urls = _resolve_grubhub_urls(restaurants, n, payload)
+    disabled = os.getenv("DISABLE_GEMINI_GRUBHUB_URL_LOOKUP", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if disabled:
+        return urls
+    guessed = _llm_grubhub_urls_batch(slim)
+    for i in range(n):
+        if urls[i] is None and i < len(guessed) and guessed[i]:
+            urls[i] = guessed[i]
+    return urls
+
+
+def _options_summary_for_description(options: Any) -> str:
+    if not options:
+        return ""
+    try:
+        if isinstance(options, dict):
+            bits: list[str] = []
+            for k, v in list(options.items())[:5]:
+                if isinstance(v, dict):
+                    bits.append(
+                        f"{k}: {', '.join(str(ik) for ik in list(v.keys())[:4])}"
+                    )
+                elif isinstance(v, list):
+                    bits.append(f"{k}: {', '.join(str(x) for x in v[:4])}")
+                else:
+                    bits.append(f"{k}: {v}")
+            return " · ".join(bits)[:200]
+        return str(options)[:200]
+    except Exception:
+        return ""
+
+
+def _full_menu_to_proposed_items(
+    full_menu: dict[str, list[Any]], max_items: int = 5
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if not full_menu or not isinstance(full_menu, dict):
+        return out
+    for category, entries in full_menu.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if len(out) >= max_items:
+                return out
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            if not name:
+                continue
+            price = str(entry.get("price") or "").strip()
+            opt = _options_summary_for_description(entry.get("options"))
+            desc_bits = [b for b in [price, str(category), opt] if b]
+            desc = " · ".join(desc_bits)[:280] or f"From the {category} section."
+            tagparts = [
+                t
+                for t in str(category).lower().replace("&", " ").split()
+                if len(t) > 2
+            ][:3]
+            tags = list(dict.fromkeys([*tagparts, "popular"]))[:8]
+            out.append({"name": name[:120], "description": desc, "tags": tags})
+    return out
+
+
+def _scrape_grubhub_menu_blocking(url: str, include_modals: bool) -> dict[str, list[dict[str, Any]]]:
+    """Headless Chrome + BeautifulSoup — prototype / demo only."""
+    from bs4 import BeautifulSoup
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+
+    def modal_options(browser: Any, el_id: Optional[str]) -> dict[str, Any]:
+        if not el_id:
+            return {}
+        try:
+            button = browser.find_element(By.ID, el_id)
+            browser.execute_script("arguments[0].click();", button)
+            time.sleep(1.2)
+            soup = BeautifulSoup(browser.page_source, "html.parser")
+            parsed: dict[str, Any] = {}
+            for option in soup.find_all("div", class_="menuItemModal-options"):
+                name_el = option.find(class_="menuItemModal-choice-name")
+                grp = name_el.get_text(strip=True) if name_el else ""
+                choices = option.find_all(
+                    "span", class_="menuItemModal-choice-option-description"
+                )
+                if not choices:
+                    continue
+                texts = [c.get_text(strip=True) for c in choices]
+                first = texts[0] if texts else ""
+                key = grp or "options"
+                if " + " in first:
+                    sub: dict[str, str] = {}
+                    for c in choices:
+                        t = c.get_text(strip=True)
+                        if " + " in t:
+                            a, b = t.split(" + ", 1)
+                            sub[a.strip()] = b.strip()
+                    parsed[key] = sub
+                else:
+                    parsed[key] = texts
+            return parsed
+        except Exception:
+            return {}
+
+    opts = Options()
+    opts.add_argument("--headless=new")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--window-size=1920,1080")
+
+    browser = webdriver.Chrome(options=opts)
+    full_menu: dict[str, list[dict[str, Any]]] = {}
+    try:
+        browser.get(url)
+        time.sleep(10)
+        html = BeautifulSoup(browser.page_source, "html.parser")
+        menu = html.find(class_="menuSectionsContainer")
+        if menu is None:
+            return {}
+        cats = menu.find_all("ghs-restaurant-menu-section")
+        if len(cats) > 1:
+            cats = cats[1:]
+        if not cats:
+            return {}
+
+        for cat in cats:
+            h3 = cat.find("h3", class_="menuSection-title")
+            title = (h3.get_text(strip=True) if h3 else "") or "Menu"
+            names = [
+                a.get_text(strip=True)
+                for a in cat.find_all("a", class_="menuItem-name")
+            ]
+            prices_list = [
+                p.get_text(strip=True)
+                for p in cat.find_all("span", class_="menuItem-displayPrice")
+            ]
+            inner_divs = cat.find_all("div", class_="menuItem-inner")
+            row_ids = [d.get("id") for d in inner_divs]
+
+            all_items: list[dict[str, Any]] = []
+            for j, itm_name in enumerate(names):
+                price = prices_list[j] if j < len(prices_list) else ""
+                el_id = row_ids[j] if j < len(row_ids) else None
+                item_opts: dict[str, Any] = {}
+                if include_modals:
+                    item_opts = modal_options(browser, el_id)
+                all_items.append(
+                    {"name": itm_name, "price": price, "options": item_opts}
+                )
+            if all_items:
+                full_menu[title] = all_items
+        return full_menu
+    finally:
+        browser.quit()
+
+
 @app.post("/menu-proposals")
 async def menu_proposals(request: Request):
     try:
@@ -386,84 +662,52 @@ async def menu_proposals(request: Request):
     if not slim:
         return {"menus": [], "source": "empty"}
 
+    n = len(slim)
+    scraped_by_index: list[Optional[list[dict[str, Any]]]] = [None] * n
+
+    scraper_on = os.getenv("ENABLE_GRUBHUB_SCRAPER", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if scraper_on:
+        urls = _resolve_scrape_urls_with_gemini(restaurants, n, payload, slim)
+        include_modals = os.getenv("GRUBHUB_SCRAPE_MODALS", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        for i in range(n):
+            u = urls[i]
+            if not u:
+                continue
+            try:
+                fm = await run_in_threadpool(_scrape_grubhub_menu_blocking, u, include_modals)
+                items = _full_menu_to_proposed_items(fm, max_items=5)
+                if len(items) >= 3:
+                    scraped_by_index[i] = items
+            except Exception:
+                pass
+
     parsed = _llm_menu_json(slim)
     menus_raw = parsed.get("menus") if isinstance(parsed, dict) else None
     menus = _normalize_menu_matrix(menus_raw, slim)
 
+    for i in range(n):
+        if scraped_by_index[i]:
+            menus[i] = scraped_by_index[i]
+
+    any_scrape = any(x is not None for x in scraped_by_index)
+    if any_scrape and parsed:
+        src = "mixed"
+    elif any_scrape:
+        src = "grubhub"
+    elif parsed:
+        src = "gemini"
+    else:
+        src = "default"
+
     return {
         "menus": menus,
-        "source": "gemini" if parsed else "default",
+        "source": src,
     }
-
-def get_item(browser, id):
-    """ given an id, scrape a menu item and all of its options """
-    button = browser.find_element_by_id(id)
-    browser.execute_script("arguments[0].click();", button)
-    time.sleep(1)
-
-    innerHTML = browser.page_source
-    html = BeautifulSoup(innerHTML, 'html.parser')
-
-    _options = {}
-    options = html.find_all('div', class_='menuItemModal-options') # menuItemModal-choice-option-description
-    for option in options:
-        name = option.find(class_='menuItemModal-choice-name').text
-        choices = option.find_all('span', class_='menuItemModal-choice-option-description')
-        if ' + ' in choices[0].text:
-            _choices = {choice.text.split(' + ')[0]:choice.text.split(' + ')[1] for choice in choices}
-        else:
-            _choices = [choice.text for choice in choices]
-        _options[name] = _choices
-    return _options
-
-def get_menu(url):
-    """ given a valid grubhub url, scrape the menu of a restaurant """
-    print('Running...')
-    chrome_options = Options()
-    # To disable headless mode (for debugging or troubleshooting), comment out the following line:
-    chrome_options.add_argument("--headless")
-
-    browser = webdriver.Chrome(options=chrome_options)
-    browser.get(url)
-    time.sleep(10)
-    innerHTML = browser.page_source
-
-    html = BeautifulSoup(innerHTML, 'html.parser')
-
-    menu = html.find(class_="menuSectionsContainer");
-    if menu is None:
-        print('menu fail')
-        get_menu(url)
-        return
-    # Categories
-    cats = menu.find_all('ghs-restaurant-menu-section')
-    cats = cats[1:]
-
-    cat_titles = [cat.find('h3', class_='menuSection-title').text for cat in cats]
-    cat_items = [[itm.text for itm in cat.find_all('a', class_='menuItem-name')] for cat in cats]
-    prices = [[p.text for p in cat.find_all('span', class_='menuItem-displayPrice')] for cat in cats]
-
-    ids = []
-    for cat in cats:
-        cat_ids = []
-        items = cat.find_all('div', class_='menuItem-inner')
-        for item in items:
-            cat_ids.append(item.get('id'))
-        ids.append(cat_ids)
-
-    full_menu = {}
-    for ind, title in enumerate(cat_titles):
-        all_items = []
-        for ind2, itm_name in enumerate(cat_items[ind]):
-            item = {}
-            item['name'] = itm_name
-            item['price'] = prices[ind][ind2]
-            item['options'] = get_item(browser, ids[ind][ind2])
-            all_items.append(item)
-        full_menu[title] = all_items
-    path = '/'.join(os.path.realpath(__file__).split('/')[:-1])
-    with open(f'{path}/data.json', 'w') as f:
-        json.dump(full_menu, f, indent=4)
-    print('[Finished]')
-get_menu(input('Grubhub Link?  '))
-#example link: 'https://www.grubhub.com/restaurant/insomnia-cookies-76-pearl-st-new-york/295836'

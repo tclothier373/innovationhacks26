@@ -16,6 +16,11 @@ export type PlacesApiRestaurantRow = {
   cuisine?: string;
   main_food?: string;
   price_range?: string;
+  vicinity?: string;
+  formatted_address?: string;
+  /** Optional per-row Grubhub URL for prototype menu scrape (backend). */
+  grubhub_url?: string;
+  grubhubUrl?: string;
 };
 
 function slugId(s: string, index: number): string {
@@ -155,16 +160,26 @@ export function mergeProposedMenusIntoRestaurants(
   });
 }
 
-/** Load Places rows, then ask the backend for popular menu lines (no Grubhub scraping). */
+export type FetchPlacesMenuOptions = {
+  /** Index-aligned with `rows` — sent to backend for prototype Grubhub scrape. */
+  prototypeGrubhubUrls?: string[];
+};
+
+/** Load Places rows, then ask the backend for menus (Gemini and/or prototype Grubhub scrape). */
 export async function fetchPlacesWithProposedMenus(
   rows: PlacesApiRestaurantRow[],
+  options?: FetchPlacesMenuOptions,
 ): Promise<Restaurant[]> {
   const base = mapPlacesApiToRestaurants(rows);
+  const urls = options?.prototypeGrubhubUrls?.filter((u) => u.trim().length > 0);
   try {
     const res = await fetch("/api/menu-proposals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ restaurants: rows }),
+      body: JSON.stringify({
+        restaurants: rows,
+        ...(urls?.length ? { prototypeGrubhubUrls: urls } : {}),
+      }),
     });
     const raw = await res.text();
     let parsed: { menus?: unknown } = {};

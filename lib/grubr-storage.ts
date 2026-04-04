@@ -10,6 +10,8 @@ export type GrubrProfile = {
     lng: number;
     label: string;
   } | null;
+  /** Demo only: Grubhub restaurant URLs, index-aligned with Places results for menu scraping. */
+  prototypeGrubhubUrls?: string[];
 };
 
 export type GrubrSwipeState = {
