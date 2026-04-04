@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { GrubrHeader } from "@/components/grubr-header";
 import { getTargetRestaurantId, setTargetRestaurantId } from "@/lib/grubr-storage";
 import { getRestaurantById } from "@/lib/mock-food";
+import { agentTransitionHref } from "@/lib/agent-transition";
 import { getCuisineVisual } from "@/lib/cuisine-utils";
 import { useIsClient } from "@/lib/use-is-client";
 
@@ -95,7 +96,14 @@ export default function RestaurantConfirmPage() {
                 type="button"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => router.push(`/restaurant-swipe?restaurantId=${restaurant.id}`)}
+                onClick={() =>
+                  router.push(
+                    agentTransitionHref(
+                      `/restaurant-swipe?restaurantId=${restaurant.id}`,
+                      "after_restaurant_choice",
+                    ),
+                  )
+                }
                 className="rounded-xl bg-brand py-3.5 text-sm font-bold text-white shadow-md shadow-brand/25 transition-all hover:bg-brand-dk"
               >
                 <span className="block text-lg mb-0.5">🎴</span>
@@ -105,7 +113,14 @@ export default function RestaurantConfirmPage() {
                 type="button"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => router.push(`/restaurant-menu?restaurantId=${restaurant.id}`)}
+                onClick={() =>
+                  router.push(
+                    agentTransitionHref(
+                      `/restaurant-menu?restaurantId=${restaurant.id}`,
+                      "after_restaurant_choice",
+                    ),
+                  )
+                }
                 className="rounded-xl border-2 border-stone-200 bg-stone-50 py-3.5 text-sm font-bold text-gray-900 transition-all hover:bg-stone-100"
               >
                 <span className="block text-lg mb-0.5">📋</span>

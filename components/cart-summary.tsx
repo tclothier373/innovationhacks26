@@ -122,17 +122,21 @@ export function CartSummary({
             {formatCurrency(total)}
           </span>
         </div>
-        <Link
-          href="/checkout"
-          className={`block rounded-xl py-2.5 text-center text-sm font-bold transition-all ${
-            items.length === 0
-              ? "cursor-not-allowed bg-stone-200 text-gray-400"
-              : "bg-brand text-white shadow-md shadow-brand/30 hover:bg-brand-dk"
-          }`}
-          aria-disabled={items.length === 0}
-        >
-          {items.length === 0 ? "Add items first" : "Go to Checkout →"}
-        </Link>
+        {items.length === 0 ? (
+          <span
+            className="block cursor-not-allowed rounded-xl bg-stone-200 py-2.5 text-center text-sm font-bold text-gray-400"
+            aria-disabled
+          >
+            Add items first
+          </span>
+        ) : (
+          <Link
+            href="/checkout"
+            className="block rounded-xl bg-brand py-2.5 text-center text-sm font-bold text-white shadow-md shadow-brand/30 transition-all hover:bg-brand-dk"
+          >
+            Go to Checkout →
+          </Link>
+        )}
       </div>
     </aside>
   );

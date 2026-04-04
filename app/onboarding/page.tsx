@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { GrubrHeader } from "@/components/grubr-header";
+import { agentTransitionHref } from "@/lib/agent-transition";
 import { saveProfile, type GrubrProfile } from "@/lib/grubr-storage";
 
 const DIETARY_OPTIONS = [
@@ -74,7 +75,7 @@ export default function OnboardingPage() {
       location,
     };
     saveProfile(profile);
-    router.push("/swiping");
+    router.push(agentTransitionHref("/swiping", "after_onboarding"));
   }
 
   const slideIn = {
