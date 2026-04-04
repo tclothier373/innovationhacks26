@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AnimatePresence,
   animate,
   motion,
   useMotionValue,
@@ -31,6 +32,7 @@ import {
   getRestaurantById,
   LIKES_THRESHOLD_SUGGEST,
   type FoodItem,
+  type Restaurant,
 } from "@/lib/mock-food";
 import { useIsClient } from "@/lib/use-is-client";
 
@@ -46,6 +48,7 @@ const EMOJI_RATINGS: { rating: number; emoji: string; label: string }[] = [
 const SPRING_SNAP = { type: "spring" as const, stiffness: 520, damping: 38 };
 const SPRING_EXIT = { type: "spring" as const, stiffness: 420, damping: 32 };
 const STAGGER = 0.04;
+const SUGGESTION_NOTIFICATION_MS = 10_000;
 
 function StarRow({ value }: { value: number }) {
   const full = Math.min(5, Math.max(0, Math.floor(value)));
@@ -276,6 +279,82 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
   );
 }
 
+type SuggestionToastProps = {
+  restaurant: Restaurant;
+  likeCount: number;
+  onContinue: () => void;
+  onDismiss: () => void;
+};
+
+function SuggestionToast({
+  restaurant,
+  likeCount,
+  onContinue,
+  onDismiss,
+}: SuggestionToastProps) {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <motion.div
+      role="status"
+      aria-live="polite"
+      initial={
+        reduceMotion
+          ? { opacity: 0 }
+          : { x: "110%", opacity: 0, rotate: 2 }
+      }
+      animate={{ x: 0, opacity: 1, rotate: 0 }}
+      exit={
+        reduceMotion
+          ? { opacity: 0 }
+          : { x: "110%", opacity: 0, rotate: -2 }
+      }
+      transition={reduceMotion ? { duration: 0.2 } : SPRING_SNAP}
+      className="pointer-events-auto fixed right-4 top-20 z-[60] w-[min(100vw-2rem,22rem)] overflow-hidden rounded-2xl border border-white/50 bg-grubr-surface/98 text-grubr-ink shadow-2xl ring-1 ring-white/70 backdrop-blur-md sm:top-24"
+    >
+      <div className="h-1 w-full overflow-hidden bg-black/10">
+        <motion.div
+          key={`bar-${restaurant.id}`}
+          className="h-full bg-grubr-orange"
+          initial={{ scaleX: 1 }}
+          animate={{ scaleX: 0 }}
+          transition={{
+            duration: SUGGESTION_NOTIFICATION_MS / 1000,
+            ease: "linear",
+          }}
+          style={{ transformOrigin: "left center" }}
+        />
+      </div>
+      <div className="p-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-grubr-orange">
+          For you
+        </p>
+        <p className="mt-1 text-base font-bold leading-tight">{restaurant.name}</p>
+        <p className="mt-0.5 text-xs text-grubr-muted-ink">{restaurant.cuisine}</p>
+        <p className="mt-2 text-xs font-medium text-grubr-orange">
+          You liked {likeCount} dishes here
+        </p>
+        <div className="mt-3 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onContinue}
+            className="rounded-xl bg-grubr-orange py-2.5 text-xs font-bold text-white shadow-md hover:bg-grubr-orange-dark"
+          >
+            Continue to restaurant
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-xl border border-grubr-border-surface bg-white py-2.5 text-xs font-semibold text-grubr-ink hover:bg-grubr-surface"
+          >
+            No, keep swiping
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function SwipingPage() {
   const router = useRouter();
   const isClient = useIsClient();
@@ -283,6 +362,10 @@ export default function SwipingPage() {
   const [index, setIndex] = useState(0);
   const [swipeState, setSwipeState] = useState<GrubrSwipeState>(getSwipeState);
   const [promptDraft, setPromptDraft] = useState("");
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<string[]>(
+    [],
+  );
+  const suggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const profile = useMemo(() => (isClient ? getProfile() : null), [isClient]);
 
@@ -331,6 +414,41 @@ export default function SwipingPage() {
       .map(([id]) => getRestaurantById(id))
       .filter(Boolean) as NonNullable<ReturnType<typeof getRestaurantById>>[];
   }, [swipeState.restaurantLikes]);
+
+  const pendingSuggestion = useMemo(() => {
+    const dismissed = new Set(dismissedSuggestionIds);
+    return suggestions.find((r) => !dismissed.has(r.id)) ?? null;
+  }, [suggestions, dismissedSuggestionIds]);
+
+  const clearSuggestionTimer = useCallback(() => {
+    if (suggestionTimerRef.current) {
+      clearTimeout(suggestionTimerRef.current);
+      suggestionTimerRef.current = null;
+    }
+  }, []);
+
+  const dismissPendingSuggestion = useCallback(() => {
+    if (!pendingSuggestion) return;
+    clearSuggestionTimer();
+    setDismissedSuggestionIds((prev) =>
+      prev.includes(pendingSuggestion.id)
+        ? prev
+        : [...prev, pendingSuggestion.id],
+    );
+  }, [pendingSuggestion, clearSuggestionTimer]);
+
+  useEffect(() => {
+    clearSuggestionTimer();
+    const id = pendingSuggestion?.id;
+    if (!id) return;
+    suggestionTimerRef.current = setTimeout(() => {
+      setDismissedSuggestionIds((prev) =>
+        prev.includes(id) ? prev : [...prev, id],
+      );
+      suggestionTimerRef.current = null;
+    }, SUGGESTION_NOTIFICATION_MS);
+    return clearSuggestionTimer;
+  }, [pendingSuggestion?.id, clearSuggestionTimer]);
 
   const handleSwipeComplete = useCallback(
     (rating: number) => {
@@ -391,6 +509,25 @@ export default function SwipingPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-transparent">
+      <AnimatePresence mode="wait">
+        {pendingSuggestion && (
+          <SuggestionToast
+            key={pendingSuggestion.id}
+            restaurant={pendingSuggestion}
+            likeCount={swipeState.restaurantLikes[pendingSuggestion.id] ?? 0}
+            onContinue={() => {
+              clearSuggestionTimer();
+              clearCart();
+              setTargetRestaurantId(pendingSuggestion.id);
+              router.push(
+                `/restaurant-confirm?restaurantId=${pendingSuggestion.id}`,
+              );
+            }}
+            onDismiss={dismissPendingSuggestion}
+          />
+        )}
+      </AnimatePresence>
+
       <motion.div
         initial={{ y: -12, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -418,50 +555,27 @@ export default function SwipingPage() {
               Like {LIKES_THRESHOLD_SUGGEST}+ dishes you are into from the same
               spot and we will spotlight that restaurant here.
             </motion.div>
+          ) : pendingSuggestion ? (
+            <motion.div
+              className="rounded-2xl border border-white/30 bg-white/10 p-4 text-sm text-white/85 shadow-lg backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              <p className="font-semibold text-white">Heads up</p>
+              <p className="mt-1 text-xs leading-relaxed text-white/75">
+                A restaurant pick just slid in from the right — it auto-hides in
+                about 10 seconds unless you act.
+              </p>
+            </motion.div>
           ) : (
-            <ul className="flex flex-col gap-3">
-              {suggestions.map((r, i) => (
-                <motion.li
-                  key={r.id}
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.06, ...SPRING_SNAP }}
-                  className="rounded-2xl border border-grubr-border-surface bg-grubr-surface p-4 shadow-lg"
-                >
-                  <p className="font-bold text-grubr-ink">{r.name}</p>
-                  <p className="mt-1 text-xs text-grubr-muted-ink">{r.cuisine}</p>
-                  <p className="mt-2 text-xs font-medium text-grubr-orange">
-                    You liked {swipeState.restaurantLikes[r.id] ?? 0} dishes
-                    here
-                  </p>
-                  <div className="mt-3 flex flex-col gap-2">
-                    <motion.button
-                      type="button"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="rounded-xl bg-grubr-orange py-2 text-xs font-bold text-white shadow-md hover:bg-grubr-orange-dark"
-                      onClick={() => {
-                        clearCart();
-                        setTargetRestaurantId(r.id);
-                        router.push(`/restaurant-confirm?restaurantId=${r.id}`);
-                      }}
-                    >
-                      Continue to restaurant
-                    </motion.button>
-                    <motion.button
-                      type="button"
-                      whileHover={{ scale: 1.01 }}
-                      whileTap={{ scale: 0.99 }}
-                      className="rounded-xl border border-grubr-border-surface bg-white/90 py-2 text-xs font-semibold text-grubr-ink hover:bg-grubr-surface"
-                      onClick={() => {}}
-                    >
-                      No, keep swiping
-                    </motion.button>
-                  </div>
-                </motion.li>
-              ))}
-            </ul>
+            <motion.div
+              className="rounded-2xl border border-dashed border-white/35 bg-grubr-surface/90 p-4 text-sm text-grubr-muted-ink shadow-lg backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              Suggestion dismissed — keep swiping. New picks can appear as you
+              like more dishes.
+            </motion.div>
           )}
           <motion.button
             type="button"
