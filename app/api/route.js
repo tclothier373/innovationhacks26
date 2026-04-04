@@ -7,35 +7,45 @@ export async function parseFoodPrompt(userPrompt) {
     model: "gemini-1.5-flash",
   });
 
-  const prompt = `
-Extract dietary preference and price range from this prompt:
+  const result = await model.generateContent({
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `
+Extract structured food preferences from this prompt:
 
 "${userPrompt}"
 
 Return ONLY valid JSON:
+
 {
-  "diet": "...",
-  "price_range": "..."
+  "diet": "string",
+  "price_range": "string",
+  "cuisine": "string",
+  "food": "string",
+  "keywords": ["string"]
 }
 
 Rules:
-- diet: vegan | vegetarian | keto | halal | gluten-free | none
-- price_range: cheap | moderate | expensive
-- Defaults:
-  diet = "none"
-  price_range = "moderate"
-`;
+- diet: none | vegetarian | vegan | gluten-free | nut-free | dairy-free | halal | kosher
+- price_range: cheap | moderate | expensive | super expensive
+- cuisine: type or "any"
+- food: specific dish or "any"
+- keywords: descriptors
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
+Defaults:
+diet="none", price_range="moderate", cuisine="any", food="any", keywords=[]
+`
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      responseMimeType: "application/json",
+    },
+  });
 
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    // fallback if model messes up
-    return {
-      diet: "none",
-      price_range: "moderate",
-    };
-  }
+  return JSON.parse(result.response.text());
 }
