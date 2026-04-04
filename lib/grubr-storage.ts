@@ -151,6 +151,29 @@ export function getCheckoutAddress(): string {
   return window.localStorage.getItem(`${PREFIX}address`) ?? "";
 }
 
+export function getDismissedSuggestionIds(): string[] {
+  if (typeof window === "undefined") return [];
+  const raw = window.localStorage.getItem(`${PREFIX}dismissed_suggestions`);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addDismissedSuggestionId(restaurantId: string): void {
+  if (typeof window === "undefined") return;
+  const existing = getDismissedSuggestionIds();
+  if (!existing.includes(restaurantId)) {
+    window.localStorage.setItem(
+      `${PREFIX}dismissed_suggestions`,
+      JSON.stringify([...existing, restaurantId]),
+    );
+  }
+}
+
 export function resetAllGrubrData(): void {
   if (typeof window === "undefined") return;
   const keys = Object.keys(window.localStorage);

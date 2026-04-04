@@ -19,10 +19,10 @@ export default function Home() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-transparent">
       <div className="flex flex-col items-center gap-3">
         <div
-          className="h-10 w-10 animate-spin rounded-full border-2 border-white border-t-transparent"
+          className="h-10 w-10 animate-spin-ring rounded-full border-[3px] border-white/25 border-t-white"
           aria-hidden
         />
-        <p className="text-sm font-medium text-white/85">Loading…</p>
+        <p className="text-sm font-semibold text-oo-m" style={{ fontFamily: "var(--font-syne)" }}>Grubr</p>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
+"use client";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import type { GrubrCartItem } from "@/lib/grubr-storage";
 
 type CartSummaryProps = {
@@ -24,74 +25,115 @@ export function CartSummary({
   items,
   onAdd,
   onRemove,
-  emptyLabel = "No items in cart yet.",
+  emptyLabel = "Add items to start your order.",
 }: CartSummaryProps) {
   const total = cartTotalCents(items);
 
   return (
-    <aside className="w-full rounded-2xl border border-grubr-border-surface bg-grubr-surface/95 p-4 text-grubr-ink shadow-xl backdrop-blur-sm lg:w-80">
-      <h2 className="text-sm font-bold uppercase tracking-[0.12em] text-grubr-orange">
-        Cart
-      </h2>
-      <div className="mt-3 space-y-2">
-        {items.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-grubr-border-surface p-3 text-sm text-grubr-muted-ink">
-            {emptyLabel}
-          </p>
-        ) : (
-          items.map((item) => (
-            <motion.div
-              key={item.id}
-              layout
-              className="rounded-xl border border-grubr-border-surface bg-white/90 p-3"
-            >
-              <p className="text-sm font-semibold">{item.name}</p>
-              <p className="text-xs text-grubr-muted-ink">
-                {formatCurrency(item.priceCents)} each
-              </p>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-grubr-orange">
-                  Qty {item.quantity}
-                </span>
-                <div className="flex gap-2">
-                  {onRemove && (
-                    <button
-                      type="button"
-                      onClick={() => onRemove(item.id)}
-                      className="rounded-md border border-grubr-border-surface px-2 py-1 text-xs font-semibold"
-                    >
-                      -
-                    </button>
-                  )}
-                  {onAdd && (
-                    <button
-                      type="button"
-                      onClick={() => onAdd(item.id)}
-                      className="rounded-md border border-grubr-border-surface px-2 py-1 text-xs font-semibold"
-                    >
-                      +
-                    </button>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          ))
+    <aside className="card flex w-full flex-col overflow-hidden rounded-2xl lg:w-80">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-b1 bg-s1 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🛒</span>
+          <h2
+            className="text-sm font-extrabold tracking-tight text-i0"
+            style={{ fontFamily: "var(--font-syne)" }}
+          >
+            Your Cart
+          </h2>
+        </div>
+        {items.length > 0 && (
+          <span className="rounded-full bg-brand px-2 py-0.5 text-[11px] font-bold text-white">
+            {items.reduce((s, i) => s + i.quantity, 0)}
+          </span>
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between border-t border-grubr-border-surface pt-3">
-        <span className="text-sm font-semibold">Subtotal</span>
-        <span className="text-sm font-bold text-grubr-orange">
-          {formatCurrency(total)}
-        </span>
+      {/* Items */}
+      <div className="flex-1 overflow-y-auto px-3 py-3">
+        {items.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-b2 bg-s2 px-4 py-6">
+            <span className="text-3xl">🍴</span>
+            <p className="text-center text-sm text-i2">{emptyLabel}</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <AnimatePresence initial={false}>
+              {items.map((item) => (
+                <motion.div
+                  key={item.id}
+                  layout
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  className="rounded-xl border border-b1 bg-white p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold leading-snug text-i0">
+                      {item.name}
+                    </p>
+                    <span className="shrink-0 text-xs font-bold text-brand">
+                      {formatCurrency(item.priceCents * item.quantity)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-xs text-i2">
+                      {formatCurrency(item.priceCents)} ea.
+                    </span>
+                    {(onAdd || onRemove) && (
+                      <div className="flex items-center gap-1.5 rounded-full border border-b1 bg-s2 px-1 py-0.5">
+                        {onRemove && (
+                          <button
+                            type="button"
+                            onClick={() => onRemove(item.id)}
+                            className="flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-i1 transition-colors hover:bg-s3"
+                          >
+                            −
+                          </button>
+                        )}
+                        <span className="min-w-[16px] text-center text-xs font-bold text-i0">
+                          {item.quantity}
+                        </span>
+                        {onAdd && (
+                          <button
+                            type="button"
+                            onClick={() => onAdd(item.id)}
+                            className="flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-brand transition-colors hover:bg-orange-50"
+                          >
+                            +
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
 
-      <Link
-        href="/checkout"
-        className="mt-4 block rounded-xl bg-grubr-orange py-2.5 text-center text-sm font-bold text-white shadow-md hover:bg-grubr-orange-dark"
-      >
-        Checkout
-      </Link>
+      {/* Footer */}
+      <div className="border-t border-b1 bg-white px-4 py-3">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-sm font-semibold text-i1">Subtotal</span>
+          <span className="text-sm font-bold text-brand">
+            {formatCurrency(total)}
+          </span>
+        </div>
+        <Link
+          href="/checkout"
+          className={`block rounded-xl py-2.5 text-center text-sm font-bold transition-all ${
+            items.length === 0
+              ? "cursor-not-allowed bg-s3 text-i3"
+              : "bg-brand text-white shadow-md shadow-brand/30 hover:bg-brand-dk"
+          }`}
+          aria-disabled={items.length === 0}
+        >
+          {items.length === 0 ? "Add items first" : "Go to Checkout →"}
+        </Link>
+      </div>
     </aside>
   );
 }

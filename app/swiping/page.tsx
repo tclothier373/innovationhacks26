@@ -19,7 +19,9 @@ import {
 } from "framer-motion";
 import { GrubrHeader } from "@/components/grubr-header";
 import {
+  addDismissedSuggestionId,
   clearCart,
+  getDismissedSuggestionIds,
   getProfile,
   getSwipeState,
   resetAllGrubrData,
@@ -34,28 +36,27 @@ import {
   type FoodItem,
   type Restaurant,
 } from "@/lib/mock-food";
+import { getCuisineVisual } from "@/lib/cuisine-utils";
 import { useIsClient } from "@/lib/use-is-client";
 
-/** Left → right: lower → higher mood */
-const EMOJI_RATINGS: { rating: number; emoji: string; label: string }[] = [
-  { rating: 1, emoji: "😞", label: "Skip" },
-  { rating: 2, emoji: "😕", label: "Meh" },
-  { rating: 3, emoji: "😐", label: "Okay" },
-  { rating: 4, emoji: "😊", label: "Like it" },
-  { rating: 5, emoji: "🤩", label: "Love it" },
+const EMOJI_RATINGS = [
+  { rating: 1, emoji: "😞", label: "Skip", color: "from-slate-100 to-slate-200" },
+  { rating: 2, emoji: "😕", label: "Meh",  color: "from-orange-50 to-amber-100" },
+  { rating: 3, emoji: "😐", label: "Okay", color: "from-amber-50 to-yellow-100" },
+  { rating: 4, emoji: "😊", label: "Like", color: "from-lime-50 to-green-100" },
+  { rating: 5, emoji: "🤩", label: "Love", color: "from-green-50 to-emerald-100" },
 ];
 
-const SPRING_SNAP = { type: "spring" as const, stiffness: 520, damping: 38 };
-const SPRING_EXIT = { type: "spring" as const, stiffness: 420, damping: 32 };
-const STAGGER = 0.04;
-const SUGGESTION_NOTIFICATION_MS = 10_000;
+const SPRING = { type: "spring" as const, stiffness: 520, damping: 38 };
+const SPRING_SOFT = { type: "spring" as const, stiffness: 420, damping: 32 };
+const SUGGESTION_MS = 10_000;
 
 function StarRow({ value }: { value: number }) {
-  const full = Math.min(5, Math.max(0, Math.floor(value)));
+  const full = Math.min(5, Math.max(0, Math.round(value)));
   return (
-    <div className="flex items-center gap-0.5 text-grubr-orange" aria-hidden>
+    <div className="flex items-center gap-0.5 text-brand" aria-label={`${value} stars`}>
       {Array.from({ length: 5 }, (_, i) => (
-        <span key={i}>{i < full ? "★" : "☆"}</span>
+        <span key={i} className={`text-sm ${i < full ? "opacity-100" : "opacity-25"}`}>★</span>
       ))}
     </div>
   );
@@ -70,80 +71,58 @@ type SwipeDeckProps = {
 function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
   const reduceMotion = useReducedMotion();
   const busy = useRef(false);
-  const exitX = typeof window !== "undefined" ? window.innerWidth * 0.55 : 400;
+  const exitX = typeof window !== "undefined" ? window.innerWidth * 0.62 : 420;
+  const visual = getCuisineVisual(restaurant.cuisine);
 
   const x = useMotionValue(0);
-  const rotate = useTransform(x, [-200, 200], [-10, 10], { clamp: true });
+  const rotate = useTransform(x, [-220, 220], [-12, 12], { clamp: true });
+  const likeOpacity = useTransform(x, [0, 100], [0, 1]);
+  const passOpacity = useTransform(x, [-100, 0], [1, 0]);
 
-  const transitionEnter = useMemo(
-    () =>
-      reduceMotion ? { duration: 0.15 } : { ...SPRING_SNAP, mass: 0.85 },
-    [reduceMotion],
-  );
-  const transitionExit = useMemo(
-    () =>
-      reduceMotion ? { duration: 0.12 } : { ...SPRING_EXIT, mass: 0.75 },
-    [reduceMotion],
-  );
+  const transitionIn  = useMemo(() => reduceMotion ? { duration: 0.15 } : { ...SPRING, mass: 0.8 }, [reduceMotion]);
+  const transitionOut = useMemo(() => reduceMotion ? { duration: 0.12 } : { ...SPRING_SOFT, mass: 0.7 }, [reduceMotion]);
 
-  const runExit = useCallback(
-    async (toRight: boolean) => {
-      const target = toRight ? exitX : -exitX;
-      await animate(x, target, transitionExit);
-    },
-    [exitX, transitionExit, x],
-  );
+  const runExit = useCallback(async (toRight: boolean) => {
+    await animate(x, toRight ? exitX : -exitX, transitionOut);
+  }, [exitX, transitionOut, x]);
 
-  const commit = useCallback(
-    async (rating: number, toRight: boolean) => {
-      if (busy.current) return;
-      busy.current = true;
-      try {
-        await runExit(toRight);
-        onComplete(rating);
-      } finally {
-        busy.current = false;
-      }
-    },
-    [onComplete, runExit],
-  );
+  const commit = useCallback(async (rating: number, toRight: boolean) => {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      await runExit(toRight);
+      onComplete(rating);
+    } finally {
+      busy.current = false;
+    }
+  }, [onComplete, runExit]);
 
-  const onEmojiPick = (rating: number) => {
-    const positive = rating >= 4;
-    void commit(rating, positive);
-  };
-
-  const onDragEnd = async (_: unknown, info: PanInfo) => {
+  const onDragEnd = useCallback(async (_: unknown, info: PanInfo) => {
     if (busy.current) return;
     const threshold = 96;
-    const vx = info.velocity.x;
-    const ox = info.offset.x;
-    if (ox > threshold || vx > 420) {
+    if (info.offset.x > threshold || info.velocity.x > 420) {
       await commit(4, true);
-    } else if (ox < -threshold || vx < -420) {
+    } else if (info.offset.x < -threshold || info.velocity.x < -420) {
       await commit(2, false);
     } else {
-      await animate(x, 0, SPRING_SNAP);
+      await animate(x, 0, SPRING);
     }
-  };
+  }, [commit, x]);
 
   return (
-    <div className="flex w-full max-w-md flex-col items-center gap-6">
-      <div className="relative w-full px-1 pt-2">
-        {/* Drag hints */}
+    <div className="flex w-full max-w-[520px] flex-col items-center gap-5">
+      {/* Card */}
+      <div className="relative w-full px-3 pt-2">
+        {/* Pass / Like ghost labels */}
         <motion.div
-          className="pointer-events-none absolute inset-y-4 left-2 z-10 flex w-16 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-[10px] font-bold uppercase tracking-wider text-white/50 backdrop-blur-sm"
-          initial={{ opacity: 0, x: -8 }}
-          animate={{ opacity: 0.35, x: 0 }}
-          transition={{ delay: 0.35, ...transitionEnter }}
+          style={{ opacity: passOpacity }}
+          className="pointer-events-none absolute left-0 top-1/3 z-20 ml-6 rounded-xl border-2 border-red-400 bg-red-50 px-4 py-1.5 text-sm font-extrabold tracking-widest text-red-500 uppercase rotate-[-12deg]"
         >
           Pass
         </motion.div>
         <motion.div
-          className="pointer-events-none absolute inset-y-4 right-2 z-10 flex w-16 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-[10px] font-bold uppercase tracking-wider text-white/50 backdrop-blur-sm"
-          initial={{ opacity: 0, x: 8 }}
-          animate={{ opacity: 0.35, x: 0 }}
-          transition={{ delay: 0.35, ...transitionEnter }}
+          style={{ opacity: likeOpacity }}
+          className="pointer-events-none absolute right-0 top-1/3 z-20 mr-6 rounded-xl border-2 border-green-500 bg-green-50 px-4 py-1.5 text-sm font-extrabold tracking-widest text-green-600 uppercase rotate-[12deg]"
         >
           Like
         </motion.div>
@@ -151,129 +130,110 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
         <motion.div
           key={item.id}
           drag="x"
-          dragConstraints={{ left: -200, right: 200 }}
-          dragElastic={0.12}
+          dragConstraints={{ left: -280, right: 280 }}
+          dragElastic={0.10}
           onDragEnd={onDragEnd}
-          initial={
-            reduceMotion
-              ? { opacity: 0 }
-              : { opacity: 0, y: 36, scale: 0.94, filter: "blur(8px)" }
-          }
-          animate={
-            reduceMotion
-              ? { opacity: 1 }
-              : {
-                  opacity: 1,
-                  y: 0,
-                  scale: 1,
-                  filter: "blur(0px)",
-                }
-          }
-          transition={transitionEnter}
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 40, scale: 0.92, filter: "blur(10px)" }}
+          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+          transition={transitionIn}
           style={{ x, rotate }}
-          whileDrag={{
-            scale: 1.02,
-            cursor: "grabbing",
-            boxShadow: "0 25px 50px -12px rgba(0,0,0,0.18)",
-          }}
-          className="relative cursor-grab touch-pan-y overflow-hidden rounded-[1.75rem] border border-white/60 bg-grubr-surface/95 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.15)] ring-1 ring-white/80 backdrop-blur-md will-change-transform active:cursor-grabbing"
+          whileDrag={{ scale: 1.025, cursor: "grabbing" }}
+          className="relative cursor-grab touch-pan-y overflow-hidden rounded-[2rem] bg-white shadow-[0_32px_72px_-12px_rgba(80,20,0,0.22),0_8px_24px_-4px_rgba(80,20,0,0.10)] will-change-transform active:cursor-grabbing"
         >
-          <motion.div
-            className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/80 via-transparent to-orange-100/40"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.45 }}
-          />
-          <div className="relative h-36 overflow-hidden bg-gradient-to-br from-white/50 via-grubr-surface to-orange-50/90">
+          {/* Food hero area */}
+          <div className={`relative h-60 overflow-hidden bg-gradient-to-br ${visual.gradient}`}>
+            {/* Ambient orbs */}
+            <div className={`absolute -top-12 -right-12 h-56 w-56 rounded-full blur-3xl ${visual.orbA} animate-orb-a`} />
+            <div className={`absolute bottom-0 left-0 h-44 w-44 rounded-full blur-2xl ${visual.orbB} animate-orb-b`} style={{ animationDelay: "0.8s" }} />
+            <div className={`absolute top-10 left-1/2 h-32 w-32 -translate-x-1/2 rounded-full blur-xl ${visual.orbC} animate-orb-c`} style={{ animationDelay: "1.6s" }} />
+
+            {/* Emoji */}
             <motion.div
-              className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-grubr-orange/15 blur-2xl"
-              animate={{ scale: [1, 1.08, 1], opacity: [0.4, 0.55, 0.4] }}
-              transition={{
-                duration: 4,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            />
-            <motion.div
-              className="absolute -bottom-6 left-6 h-24 w-24 rounded-full bg-amber-200/30 blur-xl"
-              animate={{ scale: [1, 1.12, 1] }}
-              transition={{
-                duration: 5,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            />
+              initial={{ scale: 0.7, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.12, type: "spring", stiffness: 400, damping: 24 }}
+              className="absolute inset-0 flex items-center justify-center text-[100px] select-none"
+              style={{ filter: "drop-shadow(0 12px 32px rgba(0,0,0,0.14))" }}
+            >
+              {visual.emoji}
+            </motion.div>
+
+            {/* Cuisine pill */}
+            <div className="absolute bottom-4 left-4">
+              <span className="rounded-full border border-white/50 bg-white/75 px-3 py-1 text-xs font-bold uppercase tracking-wider text-i1 backdrop-blur-sm">
+                {restaurant.cuisine}
+              </span>
+            </div>
           </div>
-          <div className="relative flex min-h-[200px] flex-col p-6">
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-grubr-orange/90">
-                  {restaurant.name}
-                </p>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <StarRow value={restaurant.stars} />
-                  <span className="text-sm font-bold text-grubr-ink">
-                    {restaurant.stars.toFixed(1)}
-                  </span>
-                  <span className="text-xs text-grubr-muted-ink">
-                    ({restaurant.reviewCount})
-                  </span>
-                </div>
+
+          {/* Card body */}
+          <div className="px-6 py-5">
+            {/* Restaurant row */}
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p
+                className="text-sm font-extrabold uppercase tracking-[0.14em] text-brand"
+                style={{ fontFamily: "var(--font-syne)" }}
+              >
+                {restaurant.name}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <StarRow value={restaurant.stars} />
+                <span className="text-sm font-bold text-i1">{restaurant.stars.toFixed(1)}</span>
+                <span className="text-xs text-i3">({restaurant.reviewCount})</span>
               </div>
             </div>
-            <h3 className="text-[1.35rem] font-bold leading-snug tracking-tight text-grubr-ink">
+
+            <h3
+              className="text-2xl font-extrabold leading-snug tracking-tight text-i0"
+              style={{ fontFamily: "var(--font-syne)" }}
+            >
               {item.name}
             </h3>
-            <p className="mt-2 text-sm leading-relaxed text-grubr-muted-ink">
+            <p className="mt-2 text-sm leading-relaxed text-i2">
               {item.description}
             </p>
           </div>
         </motion.div>
       </div>
 
+      {/* Emoji rating strip */}
       <div className="flex w-full flex-col items-center gap-3">
-        <motion.p
-          className="text-[11px] font-semibold uppercase tracking-[0.25em] text-white/55"
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.35 }}
-        >
-          How does it feel?
-        </motion.p>
-        <div className="flex w-full max-w-sm items-center justify-between gap-1.5 sm:gap-2">
-          {EMOJI_RATINGS.map(({ rating, emoji, label }, i) => (
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-oo-s">
+          Rate to advance
+        </p>
+
+        <div className="flex w-full max-w-[420px] items-end justify-between gap-2">
+          {EMOJI_RATINGS.map(({ rating, emoji, label, color }, i) => (
             <motion.button
               key={rating}
               type="button"
-              title={label}
               aria-label={label}
-              initial={{ opacity: 0, y: 16, scale: 0.85 }}
+              title={label}
+              initial={{ opacity: 0, y: 18, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{
-                delay: 0.12 + i * STAGGER,
-                ...SPRING_SNAP,
-              }}
+              transition={{ delay: 0.08 + i * 0.04, ...SPRING }}
               whileHover={{
-                scale: 1.12,
-                y: -4,
-                transition: { type: "spring", stiffness: 500, damping: 28 },
+                y: -7,
+                scale: 1.18,
+                transition: { type: "spring", stiffness: 600, damping: 22 },
               }}
-              whileTap={{ scale: 0.92 }}
-              onClick={() => onEmojiPick(rating)}
-              className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-white/30 bg-white/12 text-xl shadow-sm backdrop-blur-md transition-colors hover:border-white/50 hover:bg-white/20 sm:h-14 sm:w-14 sm:text-2xl"
+              whileTap={{ scale: 0.88 }}
+              onClick={() => void commit(rating, rating >= 4)}
+              className="flex flex-col items-center gap-1 group"
             >
-              <span className="select-none">{emoji}</span>
+              <div
+                className={`flex h-[62px] w-[62px] items-center justify-center rounded-2xl bg-gradient-to-br ${color} shadow-md shadow-black/10 ring-1 ring-black/5 transition-all group-hover:shadow-xl`}
+              >
+                <span className="text-3xl select-none">{emoji}</span>
+              </div>
+              <span className="text-[10px] font-semibold tracking-wide text-oo-s uppercase">
+                {label}
+              </span>
             </motion.button>
           ))}
         </div>
-        <motion.p
-          className="max-w-xs text-center text-xs leading-relaxed text-white/45"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.45 }}
-        >
-          Tap a mood to send it — or drag the card. No extra taps.
-        </motion.p>
+
+        <p className="text-[11px] text-oo-xs">or drag the card left / right</p>
       </div>
     </div>
   );
@@ -286,70 +246,67 @@ type SuggestionToastProps = {
   onDismiss: () => void;
 };
 
-function SuggestionToast({
-  restaurant,
-  likeCount,
-  onContinue,
-  onDismiss,
-}: SuggestionToastProps) {
+function SuggestionToast({ restaurant, likeCount, onContinue, onDismiss }: SuggestionToastProps) {
   const reduceMotion = useReducedMotion();
+  const visual = getCuisineVisual(restaurant.cuisine);
 
   return (
     <motion.div
       role="status"
       aria-live="polite"
-      initial={
-        reduceMotion
-          ? { opacity: 0 }
-          : { x: "110%", opacity: 0, rotate: 2 }
-      }
+      initial={reduceMotion ? { opacity: 0 } : { x: "115%", opacity: 0, rotate: 3 }}
       animate={{ x: 0, opacity: 1, rotate: 0 }}
-      exit={
-        reduceMotion
-          ? { opacity: 0 }
-          : { x: "110%", opacity: 0, rotate: -2 }
-      }
-      transition={reduceMotion ? { duration: 0.2 } : SPRING_SNAP}
-      className="pointer-events-auto fixed right-4 top-20 z-[60] w-[min(100vw-2rem,22rem)] overflow-hidden rounded-2xl border border-white/50 bg-grubr-surface/98 text-grubr-ink shadow-2xl ring-1 ring-white/70 backdrop-blur-md sm:top-24"
+      exit={reduceMotion ? { opacity: 0 } : { x: "115%", opacity: 0, rotate: -2 }}
+      transition={reduceMotion ? { duration: 0.2 } : { type: "spring", stiffness: 440, damping: 36 }}
+      className="pointer-events-auto fixed right-4 top-18 z-[60] w-[min(100vw-2rem,20rem)] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/20 ring-1 ring-black/5 sm:top-20"
     >
-      <div className="h-1 w-full overflow-hidden bg-black/10">
+      {/* Progress bar */}
+      <div className="h-1 w-full bg-s2">
         <motion.div
-          key={`bar-${restaurant.id}`}
-          className="h-full bg-grubr-orange"
+          key={`pb-${restaurant.id}`}
+          className="h-full bg-brand"
           initial={{ scaleX: 1 }}
           animate={{ scaleX: 0 }}
-          transition={{
-            duration: SUGGESTION_NOTIFICATION_MS / 1000,
-            ease: "linear",
-          }}
+          transition={{ duration: SUGGESTION_MS / 1000, ease: "linear" }}
           style={{ transformOrigin: "left center" }}
         />
       </div>
-      <div className="p-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-grubr-orange">
-          For you
-        </p>
-        <p className="mt-1 text-base font-bold leading-tight">{restaurant.name}</p>
-        <p className="mt-0.5 text-xs text-grubr-muted-ink">{restaurant.cuisine}</p>
-        <p className="mt-2 text-xs font-medium text-grubr-orange">
-          You liked {likeCount} dishes here
-        </p>
-        <div className="mt-3 flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={onContinue}
-            className="rounded-xl bg-grubr-orange py-2.5 text-xs font-bold text-white shadow-md hover:bg-grubr-orange-dark"
-          >
-            Continue to restaurant
-          </button>
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="rounded-xl border border-grubr-border-surface bg-white py-2.5 text-xs font-semibold text-grubr-ink hover:bg-grubr-surface"
-          >
-            No, keep swiping
-          </button>
+
+      <div className={`px-4 pt-3 pb-1 bg-gradient-to-br ${visual.gradient}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">{visual.emoji}</span>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-brand">
+              Trending for you
+            </p>
+            <p
+              className="text-base font-extrabold leading-tight text-i0"
+              style={{ fontFamily: "var(--font-syne)" }}
+            >
+              {restaurant.name}
+            </p>
+          </div>
         </div>
+        <p className="mt-1.5 mb-2.5 text-xs text-i2">
+          You&apos;ve liked <strong className="text-brand font-bold">{likeCount} dishes</strong> from here — sounds like a match.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2 p-3">
+        <button
+          type="button"
+          onClick={onContinue}
+          className="w-full rounded-xl bg-brand py-2.5 text-xs font-bold text-white shadow-md shadow-brand/25 transition-all hover:bg-brand-dk active:scale-[0.98]"
+        >
+          Continue to restaurant →
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="w-full rounded-xl border border-b1 bg-s1 py-2 text-xs font-semibold text-i2 transition-colors hover:bg-s2"
+        >
+          No, keep swiping
+        </button>
       </div>
     </motion.div>
   );
@@ -362,8 +319,9 @@ export default function SwipingPage() {
   const [index, setIndex] = useState(0);
   const [swipeState, setSwipeState] = useState<GrubrSwipeState>(getSwipeState);
   const [promptDraft, setPromptDraft] = useState("");
+  // Persisted so dismissed toasts don't re-appear after navigation
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<string[]>(
-    [],
+    () => (typeof window !== "undefined" ? getDismissedSuggestionIds() : []),
   );
   const suggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -372,10 +330,7 @@ export default function SwipingPage() {
   useEffect(() => {
     if (!isClient) return;
     const s = getSwipeState();
-    if (!getProfile()) {
-      router.replace("/onboarding");
-      return;
-    }
+    if (!getProfile()) { router.replace("/onboarding"); return; }
     const items = filterItemsByPrompt(s.contextPrompt, getProfile());
     const unseen = items.filter((i) => !s.seenItemIds.includes(i.id));
     queueMicrotask(() => {
@@ -392,10 +347,7 @@ export default function SwipingPage() {
 
   const applyPrompt = useCallback(() => {
     const prev = getSwipeState();
-    const next: GrubrSwipeState = {
-      ...prev,
-      contextPrompt: promptDraft.trim(),
-    };
+    const next: GrubrSwipeState = { ...prev, contextPrompt: promptDraft.trim() };
     persist(next);
     const items = filterItemsByPrompt(next.contextPrompt, getProfile());
     const unseen = items.filter((i) => !next.seenItemIds.includes(i.id));
@@ -404,16 +356,14 @@ export default function SwipingPage() {
   }, [persist, promptDraft]);
 
   const current = queue[index];
-  const restaurant = current
-    ? getRestaurantById(current.restaurantId)
-    : undefined;
+  const restaurant = current ? getRestaurantById(current.restaurantId) : undefined;
 
-  const suggestions = useMemo(() => {
-    return Object.entries(swipeState.restaurantLikes)
+  const suggestions = useMemo(() =>
+    Object.entries(swipeState.restaurantLikes)
       .filter(([, n]) => n >= LIKES_THRESHOLD_SUGGEST)
       .map(([id]) => getRestaurantById(id))
-      .filter(Boolean) as NonNullable<ReturnType<typeof getRestaurantById>>[];
-  }, [swipeState.restaurantLikes]);
+      .filter(Boolean) as NonNullable<ReturnType<typeof getRestaurantById>>[]
+  , [swipeState.restaurantLikes]);
 
   const pendingSuggestion = useMemo(() => {
     const dismissed = new Set(dismissedSuggestionIds);
@@ -430,10 +380,9 @@ export default function SwipingPage() {
   const dismissPendingSuggestion = useCallback(() => {
     if (!pendingSuggestion) return;
     clearSuggestionTimer();
+    addDismissedSuggestionId(pendingSuggestion.id);
     setDismissedSuggestionIds((prev) =>
-      prev.includes(pendingSuggestion.id)
-        ? prev
-        : [...prev, pendingSuggestion.id],
+      prev.includes(pendingSuggestion.id) ? prev : [...prev, pendingSuggestion.id],
     );
   }, [pendingSuggestion, clearSuggestionTimer]);
 
@@ -442,73 +391,56 @@ export default function SwipingPage() {
     const id = pendingSuggestion?.id;
     if (!id) return;
     suggestionTimerRef.current = setTimeout(() => {
-      setDismissedSuggestionIds((prev) =>
-        prev.includes(id) ? prev : [...prev, id],
-      );
+      addDismissedSuggestionId(id);
+      setDismissedSuggestionIds((prev) => prev.includes(id) ? prev : [...prev, id]);
       suggestionTimerRef.current = null;
-    }, SUGGESTION_NOTIFICATION_MS);
+    }, SUGGESTION_MS);
     return clearSuggestionTimer;
   }, [pendingSuggestion?.id, clearSuggestionTimer]);
 
-  const handleSwipeComplete = useCallback(
-    (rating: number) => {
-      if (!current) return;
-      const prev = getSwipeState();
-      const seenItemIds = [...new Set([...prev.seenItemIds, current.id])];
-      const restaurantLikes = { ...prev.restaurantLikes };
-      const positive = rating >= 4;
-      if (positive) {
-        restaurantLikes[current.restaurantId] =
-          (restaurantLikes[current.restaurantId] ?? 0) + 1;
-      }
-      const next: GrubrSwipeState = {
-        ...prev,
-        seenItemIds,
-        restaurantLikes,
-      };
-      persist(next);
+  const handleSwipeComplete = useCallback((rating: number) => {
+    if (!current) return;
+    const prev = getSwipeState();
+    const seenItemIds = [...new Set([...prev.seenItemIds, current.id])];
+    const restaurantLikes = { ...prev.restaurantLikes };
+    if (rating >= 4) {
+      restaurantLikes[current.restaurantId] = (restaurantLikes[current.restaurantId] ?? 0) + 1;
+    }
+    const next: GrubrSwipeState = { ...prev, seenItemIds, restaurantLikes };
+    persist(next);
 
-      const len = queue.length;
-      const nextIndex = index + 1;
-      if (nextIndex >= len) {
-        const items = filterItemsByPrompt(next.contextPrompt, getProfile());
-        const unseen = items.filter((i) => !seenItemIds.includes(i.id));
-        setQueue(unseen.length ? unseen : items);
-        setIndex(0);
-      } else {
-        setIndex(nextIndex);
-      }
-    },
-    [current, index, persist, queue.length],
-  );
+    const nextIndex = index + 1;
+    if (nextIndex >= queue.length) {
+      const items = filterItemsByPrompt(next.contextPrompt, getProfile());
+      const unseen = items.filter((i) => !seenItemIds.includes(i.id));
+      setQueue(unseen.length ? unseen : items);
+      setIndex(0);
+    } else {
+      setIndex(nextIndex);
+    }
+  }, [current, index, persist, queue.length]);
 
   function handleReset() {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        "Reset all saved preferences and swipe history? You will go through setup again.",
-      )
-    ) {
-      return;
-    }
+    if (typeof window !== "undefined" && !window.confirm("Reset all preferences and swipe history?")) return;
     resetAllGrubrData();
     router.push("/onboarding");
   }
 
   if (!isClient || !profile) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-transparent">
+      <div className="flex min-h-screen items-center justify-center">
         <motion.div
-          className="h-10 w-10 rounded-full border-2 border-white border-t-transparent"
+          className="h-10 w-10 rounded-full border-[3px] border-white/25 border-t-white"
           animate={{ rotate: 360 }}
-          transition={{ duration: 0.85, repeat: Infinity, ease: "linear" }}
+          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
         />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-transparent">
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* Toast overlay */}
       <AnimatePresence mode="wait">
         {pendingSuggestion && (
           <SuggestionToast
@@ -519,108 +451,135 @@ export default function SwipingPage() {
               clearSuggestionTimer();
               clearCart();
               setTargetRestaurantId(pendingSuggestion.id);
-              router.push(
-                `/restaurant-confirm?restaurantId=${pendingSuggestion.id}`,
-              );
+              router.push(`/restaurant-confirm?restaurantId=${pendingSuggestion.id}`);
             }}
             onDismiss={dismissPendingSuggestion}
           />
         )}
       </AnimatePresence>
 
-      <motion.div
-        initial={{ y: -12, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={SPRING_SNAP}
-      >
-        <GrubrHeader />
-      </motion.div>
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 lg:flex-row lg:gap-8">
+      <GrubrHeader />
+
+      {/* Three-column layout — fills remaining viewport exactly */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* LEFT — For You (desktop only) */}
         <motion.aside
-          className="order-2 flex w-full flex-col gap-3 lg:order-1 lg:w-64 lg:shrink-0"
-          initial={{ opacity: 0, x: -16 }}
+          initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.08, ...SPRING_SNAP }}
+          transition={{ delay: 0.06, ...SPRING }}
+          className="hidden lg:flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-r border-white/10 px-5 py-6"
         >
-          <h2 className="text-xs font-bold uppercase tracking-wide text-white/75">
-            For you
-          </h2>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.20em] text-oo-s mb-1">
+              For You
+            </p>
+            <p className="text-xs text-oo-xs">
+              Restaurants Grubr thinks you&apos;ll love
+            </p>
+          </div>
+
           {suggestions.length === 0 ? (
-            <motion.div
-              className="rounded-2xl border border-dashed border-white/35 bg-grubr-surface/90 p-4 text-sm text-grubr-muted-ink shadow-lg backdrop-blur-sm"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={SPRING_SNAP}
-            >
-              Like {LIKES_THRESHOLD_SUGGEST}+ dishes you are into from the same
-              spot and we will spotlight that restaurant here.
-            </motion.div>
+            <div className="flex flex-col gap-3 rounded-2xl border border-oo-xs bg-gl p-5 backdrop-blur-md">
+              <span className="text-3xl">🎯</span>
+              <div>
+                <p className="text-sm font-semibold text-oo-m">Discovering your taste…</p>
+                <p className="mt-1 text-xs leading-relaxed text-oo-s">
+                  Like {LIKES_THRESHOLD_SUGGEST}+ dishes from the same spot and we&apos;ll suggest it here — with a sweeping notification.
+                </p>
+              </div>
+            </div>
           ) : pendingSuggestion ? (
-            <motion.div
-              className="rounded-2xl border border-white/30 bg-white/10 p-4 text-sm text-white/85 shadow-lg backdrop-blur-sm"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              <p className="font-semibold text-white">Heads up</p>
-              <p className="mt-1 text-xs leading-relaxed text-white/75">
-                A restaurant pick just slid in from the right — it auto-hides in
-                about 10 seconds unless you act.
+            <div className="rounded-2xl border border-oo-xs bg-gl p-5 backdrop-blur-md">
+              <p className="text-sm font-semibold text-oo-m">👀 Heads up</p>
+              <p className="mt-2 text-xs leading-relaxed text-oo-s">
+                A restaurant suggestion just slid in from the right — it auto-hides in ~10 seconds unless you act on it.
               </p>
-            </motion.div>
+            </div>
           ) : (
-            <motion.div
-              className="rounded-2xl border border-dashed border-white/35 bg-grubr-surface/90 p-4 text-sm text-grubr-muted-ink shadow-lg backdrop-blur-sm"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              Suggestion dismissed — keep swiping. New picks can appear as you
-              like more dishes.
-            </motion.div>
+            <div className="rounded-2xl border border-oo-xs bg-gl p-5 backdrop-blur-md">
+              <p className="text-sm font-semibold text-oo-m">👍 Dismissed</p>
+              <p className="mt-2 text-xs leading-relaxed text-oo-s">
+                Keep swiping — new picks appear as you like more dishes from the same spot.
+              </p>
+            </div>
           )}
-          <motion.button
-            type="button"
-            onClick={handleReset}
-            whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.22)" }}
-            whileTap={{ scale: 0.98 }}
-            className="mt-auto rounded-xl border border-white/40 bg-white/15 py-2.5 text-xs font-semibold text-white backdrop-blur-sm"
-          >
-            Reset data & memory
-          </motion.button>
+
+          {/* Like tallies */}
+          {Object.keys(swipeState.restaurantLikes).length > 0 && (
+            <div className="rounded-2xl border border-oo-xs bg-gl p-4 backdrop-blur-md">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-oo-s mb-3">
+                Interest meter
+              </p>
+              <div className="space-y-2.5">
+                {Object.entries(swipeState.restaurantLikes).map(([id, count]) => {
+                  const r = getRestaurantById(id);
+                  if (!r) return null;
+                  return (
+                    <div key={id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-oo-m truncate">{r.name}</span>
+                        <span className="text-xs font-bold text-oo-m ml-2">{count}</span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-white/60 transition-all duration-500"
+                          style={{ width: `${Math.min(100, (count / LIKES_THRESHOLD_SUGGEST) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-auto">
+            <button
+              type="button"
+              onClick={handleReset}
+              className="w-full rounded-xl border border-oo-xs bg-gl px-4 py-3 text-xs font-semibold text-oo-m backdrop-blur-md transition-colors hover:bg-gl-hv"
+            >
+              Reset data & memory
+            </button>
+          </div>
         </motion.aside>
 
-        <section className="order-1 flex min-h-0 flex-1 flex-col items-center justify-center lg:order-2">
+        {/* CENTER — Deck */}
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.02, ...SPRING }}
+          className="flex flex-1 min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-4"
+        >
           {!current || !restaurant ? (
             <motion.div
-              className="flex flex-1 flex-col items-center justify-center gap-5 p-8 text-center"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={SPRING_SNAP}
+              className="flex flex-col items-center gap-3 text-center"
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={SPRING}
             >
-              <p className="text-lg font-semibold text-white">
-                You are caught up for now
+              <span className="text-5xl">🎉</span>
+              <p
+                className="text-2xl font-extrabold text-white"
+                style={{ fontFamily: "var(--font-syne)" }}
+              >
+                You&apos;re caught up
               </p>
-              <p className="max-w-md text-sm text-white/80">
-                Tweak the prompt on the right or reset data to see more demo
-                dishes.
+              <p className="max-w-xs text-sm text-oo-m">
+                Adjust the Food Mood prompt or replay the demo dishes.
               </p>
-              <motion.button
+              <button
                 type="button"
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
                 onClick={() => {
                   const prev = getSwipeState();
                   persist({ ...prev, seenItemIds: [] });
-                  const items = filterItemsByPrompt(
-                    prev.contextPrompt,
-                    getProfile(),
-                  );
-                  setQueue(items);
+                  setQueue(filterItemsByPrompt(prev.contextPrompt, getProfile()));
                   setIndex(0);
                 }}
-                className="rounded-full bg-white px-6 py-2.5 text-sm font-bold text-grubr-orange shadow-lg"
+                className="rounded-full bg-white px-7 py-2.5 text-sm font-bold text-brand shadow-xl transition-all hover:bg-s2 active:scale-[0.97]"
               >
                 Replay demo dishes
-              </motion.button>
+              </button>
             </motion.div>
           ) : (
             <SwipeDeck
@@ -630,41 +589,83 @@ export default function SwipingPage() {
               onComplete={handleSwipeComplete}
             />
           )}
-        </section>
+        </motion.section>
 
+        {/* RIGHT — Food Mood (desktop only) */}
         <motion.aside
-          className="order-3 w-full lg:w-72 lg:shrink-0"
-          initial={{ opacity: 0, x: 16 }}
+          initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.1, ...SPRING_SNAP }}
+          transition={{ delay: 0.08, ...SPRING }}
+          className="hidden lg:flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-white/10 px-5 py-6"
         >
-          <h2 className="text-xs font-bold uppercase tracking-wide text-white/75">
-            Food mood
-          </h2>
-          <p className="mt-1 text-xs text-white/80">
-            Tell Grubr how you feel — demo filters adjust the dish list.
-          </p>
-          <motion.textarea
-            value={promptDraft}
-            onChange={(e) => setPromptDraft(e.target.value)}
-            placeholder='e.g. "I am feeling Mediterranean right now" or "I do not really want Mexican food"'
-            rows={6}
-            whileFocus={{
-              scale: 1.01,
-              boxShadow: "0 0 0 3px rgba(255,255,255,0.35)",
-            }}
-            transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            className="mt-3 w-full resize-none rounded-2xl border border-grubr-border-surface bg-grubr-surface p-3 text-sm text-grubr-ink outline-none placeholder:text-grubr-muted-ink"
-          />
-          <motion.button
-            type="button"
-            onClick={applyPrompt}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="mt-3 w-full rounded-xl bg-white py-2.5 text-sm font-bold text-grubr-orange shadow-md"
-          >
-            Update context
-          </motion.button>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.20em] text-oo-s mb-1">
+              Food Mood
+            </p>
+            <p className="text-xs text-oo-xs">
+              Describe what you&apos;re craving — Grubr adjusts what you see in real time.
+            </p>
+          </div>
+
+          <div className="flex flex-col overflow-hidden rounded-2xl border border-oo-xs bg-gl backdrop-blur-xl">
+            <textarea
+              value={promptDraft}
+              onChange={(e) => setPromptDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), applyPrompt())}
+              placeholder={"\"I'm feeling Mediterranean tonight\"\n\"No Mexican food today\"\n\"Something spicy and cheap\"\n\"Craving something warm\""}
+              rows={7}
+              className="w-full resize-none bg-transparent px-4 py-4 text-sm text-white placeholder:text-oo-xs outline-none leading-relaxed"
+            />
+            <div className="border-t border-oo-xs px-3 py-3">
+              <button
+                type="button"
+                onClick={applyPrompt}
+                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-brand shadow-md transition-all hover:bg-s2 active:scale-[0.98]"
+              >
+                Update context ↵
+              </button>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-oo-xs bg-gl p-4 text-center backdrop-blur-md">
+              <p className="text-2xl font-extrabold text-white" style={{ fontFamily: "var(--font-syne)" }}>
+                {swipeState.seenItemIds.length}
+              </p>
+              <p className="text-[11px] text-oo-s mt-0.5">Dishes seen</p>
+            </div>
+            <div className="rounded-2xl border border-oo-xs bg-gl p-4 text-center backdrop-blur-md">
+              <p className="text-2xl font-extrabold text-white" style={{ fontFamily: "var(--font-syne)" }}>
+                {Object.values(swipeState.restaurantLikes).reduce((a, b) => a + b, 0)}
+              </p>
+              <p className="text-[11px] text-oo-s mt-0.5">Dishes liked</p>
+            </div>
+          </div>
+
+          {/* Prompt examples */}
+          <div className="rounded-2xl border border-oo-xs bg-gl p-4 backdrop-blur-md">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-oo-s mb-3">
+              Try saying…
+            </p>
+            <div className="space-y-2">
+              {[
+                "I'm feeling Mediterranean",
+                "No Mexican tonight",
+                "Something spicy",
+                "Vegetarian options",
+              ].map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => { setPromptDraft(ex); }}
+                  className="block w-full rounded-xl border border-oo-xs bg-white/5 px-3 py-2 text-left text-xs text-oo-m transition-colors hover:bg-white/10"
+                >
+                  &ldquo;{ex}&rdquo;
+                </button>
+              ))}
+            </div>
+          </div>
         </motion.aside>
       </div>
     </div>
