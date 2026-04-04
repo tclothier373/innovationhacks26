@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const contextPrompt = typeof body.contextPrompt === "string" ? body.contextPrompt : "";
   const query = buildPlacesSearchQuery(profile, contextPrompt);
 
-  const base = (process.env.GEMINI_API_KEY ?? DEFAULT_BACKEND).replace(/\/$/, "");
+  const base = (DEFAULT_BACKEND).replace(/\/$/, "");
   const url = new URL("/restaurants", `${base}/`);
   url.searchParams.set("query", query);
   if (profile?.location) {
