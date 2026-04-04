@@ -1,26 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --grubhub-orange: #ff8000;
+  --grubhub-orange-dark: #e67300;
+  --grubhub-orange-light: #fff4e6;
+  --grubhub-text: #2b2b2b;
+  --grubhub-muted: #6b6b6b;
+  --grubhub-border: #e5e5e5;
+  --grubhub-bg: #ffffff;
+  --grubhub-cream: #fafafa;
+  --background: var(--grubhub-bg);
+  --foreground: var(--grubhub-text);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-grubr);
+  --color-grubr-orange: var(--grubhub-orange);
+  --color-grubr-orange-dark: var(--grubhub-orange-dark);
+  --color-grubr-orange-light: var(--grubhub-orange-light);
+  --color-grubr-muted: var(--grubhub-muted);
+  --color-grubr-border: var(--grubhub-border);
+  --color-grubr-cream: var(--grubhub-cream);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--grubhub-cream);
+  color: var(--grubhub-text);
+  font-family: var(--font-grubr), system-ui, -apple-system, sans-serif;
 }
