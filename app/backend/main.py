@@ -1,47 +1,85 @@
-"""
-main.py — FastAPI entrypoint for the Restaurant Scraper API.
-"""
-
-from contextlib import asynccontextmanager
-import logging
-
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import requests
+import json
+import vertexai
+from vertexai.generative_models import GenerativeModel
+import os
 
-from config import get_settings
-from services.vertex import VertexService
-from routers import restaurants, jobs, health
+app = FastAPI()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-)
+# --- CONFIG ---
+PLACES_API_KEY = os.getenv("GEMINI_API_KEY")
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialise shared services on startup, clean up on shutdown."""
-    settings = get_settings()
-    app.state.vertex = VertexService(settings)
-    app.state.settings = settings
-    yield
-    # nothing to teardown for now
+vertexai.init(project="innovationhacks26", location="us-central1")
+model = GenerativeModel("gemini-1.5-flash")
 
 
-app = FastAPI(
-    title="Restaurant Scraper API",
-    description="Scrape restaurant data for any area using Google Places + Vertex AI Gemini.",
-    version="1.0.0",
-    lifespan=lifespan,
-)
+# --- STEP 1: GET RESTAURANTS ---
+def get_restaurants(query: str):
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    params = {
+        "query": query,
+        "key": PLACES_API_KEY
+    }
 
-app.include_router(health.router)
-app.include_router(restaurants.router, prefix="/restaurants", tags=["Restaurants"])
-app.include_router(jobs.router, prefix="/jobs", tags=["Jobs"])
+    res = requests.get(url, params=params)
+    return res.json().get("results", [])
+
+
+# --- STEP 2: ENRICH WITH GEMINI ---
+def enrich_restaurant(place):
+    prompt = f"""
+    Given this restaurant:
+
+    Name: {place.get("name")}
+    Types: {place.get("types")}
+    Price level: {place.get("price_level", "unknown")}
+
+    Infer:
+    - cuisine
+    - main food item
+    - price range (cheap/moderate/expensive)
+
+    Return ONLY JSON:
+    {{
+      "cuisine": "",
+      "main_food": "",
+      "price_range": ""
+    }}
+    """
+
+    response = model.generate_content(
+        prompt,
+        generation_config={
+            "response_mime_type": "application/json"
+        }
+    )
+
+    return json.loads(response.text)
+
+
+# --- API ROUTE ---
+@app.get("/restaurants")
+def get_restaurant_data(query: str = "restaurants in Tempe"):
+    places = get_restaurants(query)
+
+    results = []
+
+    for p in places[:5]:  # limit for testing
+        try:
+            ai_data = enrich_restaurant(p)
+
+            results.append({
+                "name": p.get("name"),
+                "rating": p.get("rating"),
+                "cuisine": ai_data.get("cuisine"),
+                "main_food": ai_data.get("main_food"),
+                "price_range": ai_data.get("price_range")
+            })
+        except:
+            continue
+
+    return {
+        "data": results
+    }
