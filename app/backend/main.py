@@ -6,6 +6,7 @@ from vertexai.generative_models import GenerativeModel
 import os
 
 app = FastAPI()
+#https://nonvertebral-winter-pronunciative.ngrok-free.dev/restaurants?query=cheap+food+tempe
 
 # --- CONFIG ---
 PLACES_API_KEY = os.getenv("GEMINI_API_KEY")
