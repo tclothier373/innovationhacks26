@@ -334,6 +334,10 @@ export default function SwipingPage() {
   const [placesStatus, setPlacesStatus] = useState<"loading" | "ready" | "fallback">(
     "loading",
   );
+  const [placesDiag, setPlacesDiag] = useState<{
+    error?: string;
+    hint?: string;
+  } | null>(null);
   const [contextRefreshing, setContextRefreshing] = useState(false);
   const suggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -362,7 +366,11 @@ export default function SwipingPage() {
             contextPrompt: s.contextPrompt,
           }),
         });
-        const json: { data?: unknown } = await res.json();
+        const json: {
+          data?: unknown;
+          error?: string;
+          hint?: string;
+        } = await res.json();
         if (cancelled) return;
 
         const rows = json.data;
@@ -371,14 +379,22 @@ export default function SwipingPage() {
             mapPlacesApiToRestaurants(rows as PlacesApiRestaurantRow[]),
           );
           setPlacesStatus("ready");
+          setPlacesDiag(null);
         } else {
           setDynamicRestaurants(null);
           setPlacesStatus("fallback");
+          setPlacesDiag({
+            error: typeof json.error === "string" ? json.error : undefined,
+            hint: typeof json.hint === "string" ? json.hint : undefined,
+          });
         }
       } catch {
         if (!cancelled) {
           setDynamicRestaurants(null);
           setPlacesStatus("fallback");
+          setPlacesDiag({
+            error: "Could not reach the restaurant API. Is the FastAPI server running and RESTAURANTS_API_URL set?",
+          });
         }
       }
 
@@ -424,20 +440,32 @@ export default function SwipingPage() {
           contextPrompt: next.contextPrompt,
         }),
       });
-      const json: { data?: unknown } = await res.json();
+      const json: {
+        data?: unknown;
+        error?: string;
+        hint?: string;
+      } = await res.json();
       const rows = json.data;
       if (Array.isArray(rows) && rows.length > 0) {
         setDynamicRestaurants(
           mapPlacesApiToRestaurants(rows as PlacesApiRestaurantRow[]),
         );
         setPlacesStatus("ready");
+        setPlacesDiag(null);
       } else {
         setDynamicRestaurants(null);
         setPlacesStatus("fallback");
+        setPlacesDiag({
+          error: typeof json.error === "string" ? json.error : undefined,
+          hint: typeof json.hint === "string" ? json.hint : undefined,
+        });
       }
     } catch {
       setDynamicRestaurants(null);
       setPlacesStatus("fallback");
+      setPlacesDiag({
+        error: "Could not reach the restaurant API. Is the FastAPI server running?",
+      });
     } finally {
       setContextRefreshing(false);
     }
@@ -692,11 +720,25 @@ export default function SwipingPage() {
             </div>
           )}
           {placesStatus === "fallback" && (
-            <p className="absolute top-2 left-1/2 z-10 max-w-md -translate-x-1/2 rounded-full border border-white/20 bg-black/20 px-4 py-1.5 text-center text-[11px] text-white/85 backdrop-blur-md">
-              Places API unavailable — showing sample restaurants. Run the Python backend and set{" "}
-              <code className="rounded bg-white/10 px-1">RESTAURANTS_API_URL</code> /{" "}
-              <code className="rounded bg-white/10 px-1">GOOGLE_MAPS_API_KEY</code>.
-            </p>
+            <div className="absolute top-2 left-1/2 z-10 max-w-lg -translate-x-1/2 rounded-2xl border border-white/20 bg-black/35 px-4 py-2.5 text-left text-[11px] text-white/90 backdrop-blur-md">
+              <p className="font-semibold text-white">Using sample restaurants</p>
+              {placesDiag?.error && (
+                <p className="mt-1 text-white/80">{placesDiag.error}</p>
+              )}
+              {placesDiag?.hint && (
+                <p className="mt-1 text-white/70">{placesDiag.hint}</p>
+              )}
+              {!placesDiag?.error && (
+                <p className="mt-1 text-white/75">
+                  Start the FastAPI app, set{" "}
+                  <code className="rounded bg-white/10 px-1">RESTAURANTS_API_URL</code> in{" "}
+                  <code className="rounded bg-white/10 px-1">.env.local</code>, and use a{" "}
+                  <strong className="font-semibold text-white">Maps Places–enabled</strong> key as{" "}
+                  <code className="rounded bg-white/10 px-1">GOOGLE_MAPS_API_KEY</code> in the repo{" "}
+                  <code className="rounded bg-white/10 px-1">.env</code> (Gemini-only keys do not work for Places).
+                </p>
+              )}
+            </div>
           )}
           {!current || !restaurant ? (
             <motion.div
