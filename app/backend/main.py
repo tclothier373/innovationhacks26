@@ -66,7 +66,7 @@ try:
     from vertexai.generative_models import GenerativeModel as VertexModel
 
     vertexai.init(project="innovationhacks26", location="us-central1")
-    _vertex_model = VertexModel("gemini-1.5-flash")
+    _vertex_model = VertexModel("gemini-2.5-flash")
 except Exception:
     _vertex_model = None
 
@@ -77,7 +77,7 @@ try:
     _gk = os.getenv("GEMINI_API_KEY", "").strip()
     if _gk:
         genai.configure(api_key=_gk)
-        _genai_model = genai.GenerativeModel("gemini-1.5-flash")
+        _genai_model = genai.GenerativeModel("gemini-2.5-flash")
 except Exception:
     _genai_model = None
 
@@ -475,31 +475,27 @@ def _resolve_photo_url(photo_reference: str, api_key: str) -> Optional[str]:
     return None
 
 
-def _scrape_website_menu(url: str) -> list[dict[str, Any]]:
+def _scrape_website_menu(url: str, restaurant_name: str = "", cuisine: str = "") -> list[dict[str, Any]]:
     """
-    Scrape a restaurant website for menu items.
-    Strategy order: JSON-LD schema → HTML heuristics (CSS classes, headings+prices).
-    Returns list of {name, description, image_url} dicts.
+    Scrape a restaurant website for menu items using Gemini as the primary extractor.
+    Strategy:
+      1. JSON-LD schema.org (fast, structured — return immediately if found)
+      2. Collect text from homepage + menu sub-pages + PDFs → Gemini extraction
+    Returns list of {name, description, image_url} dicts (>= 3 items or []).
     """
-    import re as _re
     from bs4 import BeautifulSoup
-    from urllib.parse import urljoin
+    from urllib.parse import urljoin, urlparse, urlunparse
 
-    _PRICE_RE = _re.compile(r"\$\s*\d+")
-    _SKIP_WORDS = {"menu", "home", "about", "contact", "reservation", "reservations",
-                   "hours", "location", "directions", "gift", "careers", "press"}
-    _SKIP_CONTAINERS = {"nav", "header", "footer", "sidebar", "widget", "breadcrumb", "social"}
-
-    headers = {
+    _FETCH_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    def _fetch(fetch_url: str) -> tuple[Optional[Any], str]:
+    def _fetch_html(fetch_url: str) -> tuple[Optional[Any], str]:
         try:
-            r = requests.get(fetch_url, headers=headers, timeout=12, allow_redirects=True)
-            if r.ok:
+            r = requests.get(fetch_url, headers=_FETCH_HEADERS, timeout=12, allow_redirects=True)
+            if r.ok and "text/html" in r.headers.get("content-type", ""):
                 return BeautifulSoup(r.text, "html.parser"), r.url
         except Exception as e:
             print(f"[website-scrape] fetch {fetch_url}: {e}", flush=True)
@@ -549,192 +545,164 @@ def _scrape_website_menu(url: str) -> list[dict[str, Any]]:
                     elif typ == "MenuItem":
                         name = str(node.get("name") or "").strip()
                         if name:
-                            desc = str(node.get("description") or "").strip()
-                            found.append({"name": name, "description": desc, "image_url": None})
+                            found.append({"name": name, "description": str(node.get("description") or "").strip(), "image_url": None})
             except Exception:
                 continue
         return found
 
-    def _html_items(soup: Any) -> list[dict]:
-        """Heuristic HTML extraction: CSS class patterns then heading+price scan."""
-        # Pattern 1: common menu-item CSS classes
-        class_patterns = [
-            "menu-item", "menu_item", "menuitem", "food-item", "food_item",
-            "dish", "menu-list-item", "menu-entry", "food-menu-item",
-            "menu-product", "menu-content-item", "wprmenu_item",
-        ]
-        for pat in class_patterns:
-            els = soup.find_all(class_=_re.compile(pat, _re.I))
-            if len(els) >= 3:
-                results: list[dict] = []
-                for el in els[:10]:
-                    name_el = el.find(["h2", "h3", "h4", "h5", "strong", "b"]) or el
-                    name = name_el.get_text(strip=True)[:100]
-                    if not name or len(name) < 3:
-                        continue
-                    desc_el = el.find("p")
-                    desc = desc_el.get_text(strip=True)[:200] if desc_el else ""
-                    img_el = el.find("img")
-                    img = img_el.get("src") if img_el else None
-                    results.append({"name": name, "description": desc, "image_url": img})
-                if len(results) >= 3:
-                    print(f"[website-scrape] CSS class '{pat}' → {len(results)} items", flush=True)
-                    return results[:8]
-
-        # Pattern 2: headings inside price-bearing containers
-        for container in soup.find_all(["section", "article", "div", "ul"], limit=200):
-            cls_id = " ".join(container.get("class") or []) + " " + (container.get("id") or "")
-            cls_id = cls_id.lower()
-            if any(s in cls_id for s in _SKIP_CONTAINERS):
-                continue
-            if not _PRICE_RE.search(container.get_text()):
-                continue
-            headings = container.find_all(["h3", "h4", "h5", "strong"])
-            if len(headings) < 3:
-                continue
-            batch: list[dict] = []
-            for h in headings[:12]:
-                name = h.get_text(strip=True)[:100]
-                if not name or len(name) < 3 or len(name) > 80:
-                    continue
-                # Filter navigation-like text
-                if name.lower() in _SKIP_WORDS or name.lower().startswith(("$", "©")):
-                    continue
-                desc = ""
-                nxt = h.find_next_sibling(["p", "span", "div"])
-                if nxt:
-                    d = nxt.get_text(strip=True)[:200]
-                    if 4 < len(d) < 300:
-                        desc = d
-                img_el = h.find("img") or (nxt.find("img") if nxt else None)
-                img = img_el.get("src") if img_el else None
-                batch.append({"name": name, "description": desc, "image_url": img})
-            if len(batch) >= 3:
-                print(f"[website-scrape] heading+price heuristic → {len(batch)} items", flush=True)
-                return batch[:8]
-
-        return []
-
-    def _menu_links(soup: Any, base_url: str) -> list[str]:
-        """Find candidate menu page URLs on the page, skipping PDFs and external sites."""
-        from urllib.parse import urlparse
+    def _collect_links(soup: Any, base_url: str) -> tuple[list[str], list[str]]:
+        """Return (html_menu_links, pdf_menu_links) found on the page."""
         base_host = urlparse(base_url).netloc
         seen: set[str] = set()
-        links: list[str] = []
+        html_links: list[str] = []
+        pdf_links: list[str] = []
         for a in soup.find_all("a", href=True):
             href = str(a["href"]).strip()
             if not href or href.startswith("#"):
                 continue
             full = href if href.startswith("http") else urljoin(base_url, href)
-            # Skip PDFs
-            if full.lower().endswith(".pdf"):
-                continue
-            # Skip external domains
             if urlparse(full).netloc not in ("", base_host):
                 continue
-            text = (a.get_text(strip=True) or "").lower()
-            path = full.lower()
-            if "menu" in text or "/menu" in path:
-                if full not in seen and full != base_url:
-                    seen.add(full)
-                    links.append(full)
-        return links[:4]
+            if full in seen:
+                continue
+            seen.add(full)
+            link_text = (a.get_text(strip=True) or "").lower()
+            path_lower = full.lower()
+            is_menu_related = (
+                "menu" in link_text or "food" in link_text or "dining" in link_text
+                or "/menu" in path_lower or "/food" in path_lower or "/dining" in path_lower
+                or "order" in link_text
+            )
+            if not is_menu_related:
+                continue
+            if path_lower.endswith(".pdf"):
+                pdf_links.append(full)
+            elif full != base_url:
+                html_links.append(full)
+        return html_links[:5], pdf_links[:3]
 
-    print(f"[website-scrape] fetching {url}", flush=True)
-    soup, final_url = _fetch(url)
+    print(f"[website-scrape] starting {url}", flush=True)
+
+    # --- Step 1: homepage ---
+    soup, final_url = _fetch_html(url)
     if soup is None:
+        print(f"[website-scrape] homepage fetch failed for {url}", flush=True)
         return []
 
-    # 1. Try JSON-LD on homepage
-    items = _jsonld_items(soup)
-    if len(items) >= 3:
-        print(f"[website-scrape] {len(items)} items via JSON-LD (homepage)", flush=True)
-        return items[:8]
+    # Fast path: JSON-LD
+    ld_items = _jsonld_items(soup)
+    if len(ld_items) >= 3:
+        print(f"[website-scrape] {len(ld_items)} items via JSON-LD (homepage)", flush=True)
+        return ld_items[:8]
 
-    # 2. Try HTML heuristics on homepage
-    items = _html_items(soup)
-    if len(items) >= 3:
-        print(f"[website-scrape] {len(items)} items via HTML heuristics (homepage)", flush=True)
-        return items[:8]
+    # Collect homepage text
+    text_blocks: list[str] = [_extract_clean_text(soup)]
 
-    # 3. Follow menu links and try both strategies on each
-    for menu_url in _menu_links(soup, final_url):
-        print(f"[website-scrape] trying menu page: {menu_url}", flush=True)
-        msoup, _ = _fetch(menu_url)
+    # Find menu links and PDFs from homepage
+    html_links, pdf_links = _collect_links(soup, final_url)
+
+    # Also probe common URL suffixes
+    parsed_base = urlparse(final_url)
+    origin = urlunparse((parsed_base.scheme, parsed_base.netloc, "", "", "", ""))
+    for suffix in ["/menu", "/menus", "/our-menu", "/food-menu", "/dining", "/food", "/order"]:
+        candidate = origin + suffix
+        if candidate != final_url and candidate not in html_links:
+            html_links.append(candidate)
+
+    # --- Step 2: follow HTML menu pages ---
+    for menu_url in html_links[:6]:
+        print(f"[website-scrape] fetching menu page {menu_url}", flush=True)
+        msoup, _ = _fetch_html(menu_url)
         if msoup is None:
             continue
-        items = _jsonld_items(msoup)
-        if len(items) >= 3:
-            print(f"[website-scrape] {len(items)} items via JSON-LD ({menu_url})", flush=True)
-            return items[:8]
-        items = _html_items(msoup)
-        if len(items) >= 3:
-            print(f"[website-scrape] {len(items)} items via HTML heuristics ({menu_url})", flush=True)
-            return items[:8]
+        ld = _jsonld_items(msoup)
+        if len(ld) >= 3:
+            print(f"[website-scrape] {len(ld)} items via JSON-LD ({menu_url})", flush=True)
+            return ld[:8]
+        text_blocks.append(_extract_clean_text(msoup))
+        # Also pick up any PDFs linked from this page
+        _, more_pdfs = _collect_links(msoup, menu_url)
+        for p in more_pdfs:
+            if p not in pdf_links:
+                pdf_links.append(p)
 
-    # 4. Also try common menu URL suffixes if not found yet
-    from urllib.parse import urlparse, urlunparse
-    parsed = urlparse(final_url)
-    base = urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
-    for suffix in ["/menu", "/menus", "/our-menu", "/food-menu", "/dining"]:
-        candidate = base + suffix
-        if candidate == final_url:
-            continue
-        print(f"[website-scrape] trying common path: {candidate}", flush=True)
-        msoup, _ = _fetch(candidate)
-        if msoup is None:
-            continue
-        items = _jsonld_items(msoup) or _html_items(msoup)
-        if len(items) >= 3:
-            print(f"[website-scrape] {len(items)} items at {candidate}", flush=True)
-            return items[:8]
+    # --- Step 3: extract PDF text ---
+    for pdf_url in pdf_links[:3]:
+        print(f"[website-scrape] extracting PDF {pdf_url}", flush=True)
+        pdf_text = _extract_pdf_text(pdf_url, _FETCH_HEADERS)
+        if pdf_text.strip():
+            text_blocks.append(pdf_text)
 
-    print(f"[website-scrape] no menu items found for {url}", flush=True)
-    return []
+    # --- Step 4: Gemini extraction from all collected text ---
+    print(f"[website-scrape] sending {len(text_blocks)} text blocks to Gemini for {restaurant_name or url}", flush=True)
+    items = _gemini_extract_menu_from_text(text_blocks, restaurant_name or url, cuisine)
+    print(f"[website-scrape] Gemini returned {len(items)} items for {restaurant_name or url}", flush=True)
+    return items
 
 
-def _gemini_validate_menu_items(
-    raw_items: list[dict[str, Any]], restaurant: dict[str, Any]
+def _extract_clean_text(soup: Any) -> str:
+    """Strip a BeautifulSoup tree down to readable lines of text."""
+    for tag in soup.find_all(["script", "style", "noscript", "iframe", "meta", "link", "head"]):
+        tag.decompose()
+    text = soup.get_text(separator="\n", strip=True)
+    lines = [l.strip() for l in text.splitlines() if len(l.strip()) > 1]
+    return "\n".join(lines[:500])
+
+
+def _extract_pdf_text(url: str, headers: dict) -> str:
+    """Download a PDF and extract its text, capped at 10 pages."""
+    try:
+        import pypdf
+        from io import BytesIO
+
+        r = requests.get(url, headers=headers, timeout=20)
+        if not r.ok:
+            return ""
+        reader = pypdf.PdfReader(BytesIO(r.content))
+        parts: list[str] = []
+        for page in reader.pages[:10]:
+            t = page.extract_text() or ""
+            if t.strip():
+                parts.append(t)
+        text = "\n".join(parts)
+        print(f"[pdf-extract] {url} → {len(text)} chars", flush=True)
+        return text[:8000]
+    except Exception as e:
+        print(f"[pdf-extract] {url}: {e}", flush=True)
+        return ""
+
+
+def _gemini_extract_menu_from_text(
+    text_blocks: list[str], restaurant_name: str, cuisine: str
 ) -> list[dict[str, Any]]:
     """
-    Ask Gemini to filter scraped items down to actual food/drink menu items only.
-    Returns validated items, or empty list if fewer than 3 valid items found.
+    Give Gemini page text from a restaurant website and have it extract
+    real food/drink menu items. Returns [] if fewer than 3 found.
     """
-    if not raw_items:
+    if not text_blocks or (_genai_model is None and _vertex_model is None):
         return []
 
-    restaurant_name = restaurant.get("name") or "this restaurant"
-    cuisine = restaurant.get("cuisine") or "restaurant"
+    combined = "\n\n--- PAGE BREAK ---\n\n".join(b for b in text_blocks if b.strip())
+    combined = combined[:12000]  # keep tokens sane
 
-    items_payload = [
-        {"index": i, "name": it.get("name", ""), "description": it.get("description", "")}
-        for i, it in enumerate(raw_items)
-    ]
+    prompt = f"""You are a menu data extractor. Extract food and drink items from the text below, scraped from the website of "{restaurant_name}" ({cuisine} restaurant).
 
-    prompt = f"""You are reviewing text scraped from the website of "{restaurant_name}", a {cuisine} restaurant.
+TEXT:
+{combined}
 
-Below are items extracted from their website. Identify which are ACTUAL food or drink menu items a customer could order.
-
-REJECT anything that is:
-- Navigation or UI text ("Home", "About", "Contact", "Reserve Now", "Book a Table", "Order Online")
-- Operating info ("Our Hours", "Open Daily", "Location", "Directions", "Parking", "Find Us")
-- Non-food content ("Gift Cards", "Catering", "Events", "Press", "Careers", "Private Dining")
-- Generic section headers without a specific dish name ("Appetizers", "Drinks", "Desserts")
-- Marketing copy or slogans
-
-ACCEPT only items with a SPECIFIC food or drink name that a customer could order (e.g. "Spicy Tuna Roll", "Chicken Tikka Masala", "House Margarita").
-
-Items to evaluate:
-{json.dumps(items_payload, ensure_ascii=False)}
+RULES:
+- Only include specific, orderable food or drink items (e.g. "Spicy Tuna Roll", "BBQ Brisket Plate", "House Margarita").
+- Skip: navigation links, hours, addresses, phone numbers, reservation prompts, "About Us", marketing copy, generic section headers like "Appetizers" or "Drinks" that are not themselves a dish name.
+- If a description is present in the text, include it. Otherwise leave description empty.
+- Return up to 8 items, most popular / most prominent first.
+- If you cannot find at least 3 real menu items, return an empty items array.
 
 Return ONLY valid JSON:
 {{
-  "valid": [
-    {{"index": 0, "name": "corrected dish name", "description": "description or empty string"}}
+  "items": [
+    {{"name": "dish name", "description": "one-line description or empty string"}}
   ]
-}}
-Include at most 5 items. If fewer than 3 are genuine menu items, return {{"valid": []}}.
-"""
+}}"""
 
     parsed: Optional[dict] = None
     for model in [_genai_model, _vertex_model]:
@@ -748,31 +716,28 @@ Include at most 5 items. If fewer than 3 are genuine menu items, return {{"valid
             parsed = _parse_json_from_model(getattr(r, "text", "") or "")
             break
         except Exception as e:
-            print(f"[gemini-validate] error: {e}", flush=True)
+            print(f"[gemini-extract] error: {e}", flush=True)
 
     if not isinstance(parsed, dict):
-        print("[gemini-validate] no LLM available, returning empty", flush=True)
+        print("[gemini-extract] no LLM available or parse failed", flush=True)
         return []
 
-    valid = parsed.get("valid")
-    if not isinstance(valid, list) or len(valid) < 3:
+    items = parsed.get("items")
+    if not isinstance(items, list) or len(items) < 3:
         return []
 
     result: list[dict[str, Any]] = []
-    for entry in valid[:5]:
-        if not isinstance(entry, dict):
+    for item in items[:8]:
+        if not isinstance(item, dict):
             continue
-        name = str(entry.get("name") or "").strip()
-        if not name:
+        name = str(item.get("name") or "").strip()
+        if not name or len(name) < 2:
             continue
-        orig_idx = entry.get("index")
-        original = raw_items[orig_idx] if isinstance(orig_idx, int) and 0 <= orig_idx < len(raw_items) else {}
         result.append({
             "name": name[:120],
-            "description": (str(entry.get("description") or "").strip() or original.get("description", ""))[:280],
-            "image_url": original.get("image_url"),
+            "description": str(item.get("description") or "").strip()[:280],
+            "image_url": None,
         })
-
     return result
 
 
@@ -841,29 +806,21 @@ async def discover(request: Request):
             print(f"[discover] [{i}] '{name}' — no website, skipping", flush=True)
             continue
 
-        # Scrape raw items from their website
-        raw_items = await run_in_threadpool(_scrape_website_menu, website)
-        print(f"[discover] [{i}] '{name}' — scraped {len(raw_items)} raw items", flush=True)
-
-        if not raw_items:
-            print(f"[discover] [{i}] '{name}' — 0 scraped items, skipping", flush=True)
-            continue
-
-        # Validate with Gemini — filter out nav/UI junk
-        restaurant_ctx = {"name": name, "cuisine": enrich.get("cuisine", "")}
-        valid_items = await run_in_threadpool(_gemini_validate_menu_items, raw_items, restaurant_ctx)
-        print(f"[discover] [{i}] '{name}' — {len(valid_items)} valid items after Gemini filter", flush=True)
+        # Scrape website — Gemini extraction is built into _scrape_website_menu
+        cuisine_hint = enrich.get("cuisine", "")
+        valid_items = await run_in_threadpool(_scrape_website_menu, website, name, cuisine_hint)
+        print(f"[discover] [{i}] '{name}' — {len(valid_items)} valid items", flush=True)
 
         if len(valid_items) < 3:
-            print(f"[discover] [{i}] '{name}' — not enough valid items, skipping", flush=True)
+            print(f"[discover] [{i}] '{name}' — not enough items, skipping", flush=True)
             continue
 
         # Resolve photo URLs
         photo_urls: list[str] = []
         for ref in photo_refs:
-            url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
-            if url:
-                photo_urls.append(url)
+            photo_url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
+            if photo_url:
+                photo_urls.append(photo_url)
 
         # Build menu with image assignment
         menu: list[dict[str, Any]] = []
@@ -958,7 +915,9 @@ async def menu_proposals(request: Request):
             # 3. Scrape website for real menu items
             website_items: list[dict[str, Any]] = []
             if website:
-                website_items = await run_in_threadpool(_scrape_website_menu, website)
+                r_name = slim[i].get("name") or ""
+                r_cuisine = slim[i].get("cuisine") or ""
+                website_items = await run_in_threadpool(_scrape_website_menu, website, r_name, r_cuisine)
                 print(f"[menu-proposals] [{i}] website scrape returned {len(website_items)} items", flush=True)
 
             # 4. Build proposed items — website items if found, else photo-backed placeholders
