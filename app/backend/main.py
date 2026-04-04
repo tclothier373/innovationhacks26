@@ -275,6 +275,7 @@ def get_restaurant_data(
 
     results: list[dict[str, Any]] = []
     for p, ai_data in zip(selected, enrichments):
+        geo = (p.get("geometry") or {}).get("location") or {}
         results.append(
             {
                 "place_id": p.get("place_id"),
@@ -285,6 +286,8 @@ def get_restaurant_data(
                 "types": p.get("types"),
                 "vicinity": p.get("vicinity"),
                 "formatted_address": p.get("formatted_address"),
+                "lat": geo.get("lat"),
+                "lng": geo.get("lng"),
                 "cuisine": ai_data.get("cuisine"),
                 "main_food": ai_data.get("main_food"),
                 "price_range": ai_data.get("price_range"),
@@ -643,6 +646,9 @@ def _grubhub_search_restaurant_id(
     elif address:
         params["location"] = address
 
+    print(f"[grubhub-search] querying for '{name}' | address={address!r} lat={lat} lng={lng}", flush=True)
+    print(f"[grubhub-search] params: {params}", flush=True)
+
     try:
         res = requests.get(
             "https://api-gtm.grubhub.com/restaurants/search",
@@ -650,15 +656,20 @@ def _grubhub_search_restaurant_id(
             headers=_GRUBHUB_API_HEADERS,
             timeout=15,
         )
+        print(f"[grubhub-search] HTTP {res.status_code} for '{name}'", flush=True)
         if not res.ok:
+            print(f"[grubhub-search] non-OK response body (first 500): {res.text[:500]}", flush=True)
             return None
         data = res.json()
-    except Exception:
+    except Exception as e:
+        print(f"[grubhub-search] request exception for '{name}': {e}", flush=True)
         return None
 
     results = (
         (data.get("search_result") or {}).get("results") or []
     )
+    print(f"[grubhub-search] got {len(results)} results for '{name}'", flush=True)
+
     # Pick the result whose name most closely matches
     name_lower = name.lower()
     best_id: Optional[int] = None
@@ -669,11 +680,13 @@ def _grubhub_search_restaurant_id(
             continue
         rid = rest.get("id")
         rname = str(rest.get("name") or "").lower()
-        # Simple overlap score
         score = sum(1 for word in name_lower.split() if word in rname)
+        print(f"[grubhub-search]   candidate id={rid} name={rname!r} score={score}", flush=True)
         if score > best_score:
             best_score = score
             best_id = rid
+
+    print(f"[grubhub-search] best match for '{name}': id={best_id} score={best_score}", flush=True)
     return best_id if best_id is not None else None
 
 
@@ -681,6 +694,7 @@ def _grubhub_fetch_menu_by_id(
     restaurant_id: int,
 ) -> dict[str, list[dict[str, Any]]]:
     """Fetch full menu from Grubhub's restaurant detail API by restaurant ID."""
+    print(f"[grubhub-menu] fetching menu for restaurant id={restaurant_id}", flush=True)
     try:
         res = requests.get(
             f"https://api-gtm.grubhub.com/restaurants/{restaurant_id}",
@@ -688,17 +702,22 @@ def _grubhub_fetch_menu_by_id(
             headers=_GRUBHUB_API_HEADERS,
             timeout=15,
         )
+        print(f"[grubhub-menu] HTTP {res.status_code} for id={restaurant_id}", flush=True)
         if not res.ok:
+            print(f"[grubhub-menu] non-OK body (first 500): {res.text[:500]}", flush=True)
             return {}
         data = res.json()
-    except Exception:
+    except Exception as e:
+        print(f"[grubhub-menu] request exception for id={restaurant_id}: {e}", flush=True)
         return {}
 
     restaurant = data.get("restaurant")
     if not isinstance(restaurant, dict):
+        print(f"[grubhub-menu] 'restaurant' key missing or not a dict. top-level keys: {list(data.keys())}", flush=True)
         return {}
 
     categories = restaurant.get("menu_category_list") or []
+    print(f"[grubhub-menu] id={restaurant_id} has {len(categories)} menu categories", flush=True)
     full_menu: dict[str, list[dict[str, Any]]] = {}
     for cat in categories:
         if not isinstance(cat, dict):
@@ -720,8 +739,12 @@ def _grubhub_fetch_menu_by_id(
             parsed_items.append(
                 {"name": item_name, "price": price_str, "description": desc, "options": {}}
             )
+        print(f"[grubhub-menu]   category '{cat_name}': {len(parsed_items)} items", flush=True)
         if parsed_items:
             full_menu[cat_name] = parsed_items
+
+    total_items = sum(len(v) for v in full_menu.values())
+    print(f"[grubhub-menu] id={restaurant_id} total parsed items: {total_items} across {len(full_menu)} categories", flush=True)
     return full_menu
 
 
@@ -734,6 +757,7 @@ def _fetch_grubhub_menu_for_restaurant(
     """Search Grubhub for a restaurant by name+location, then return its full menu."""
     rid = _grubhub_search_restaurant_id(name, address, lat, lng)
     if rid is None:
+        print(f"[grubhub] no restaurant ID found for '{name}' — skipping menu fetch", flush=True)
         return {}
     return _grubhub_fetch_menu_by_id(rid)
 
@@ -806,11 +830,17 @@ async def menu_proposals(request: Request):
     n = len(slim)
     scraped_by_index: list[Optional[list[dict[str, Any]]]] = [None] * n
 
-    scraper_on = os.getenv("ENABLE_GRUBHUB_SCRAPER", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    # Log the raw restaurant objects so we can verify which fields are present
+    print(f"[menu-proposals] received {len(restaurants)} restaurants. First object keys: {list(restaurants[0].keys()) if restaurants else 'none'}", flush=True)
+    if restaurants:
+        first = restaurants[0]
+        print(f"[menu-proposals] first restaurant sample: name={first.get('name')!r} vicinity={first.get('vicinity')!r} formatted_address={first.get('formatted_address')!r} lat={first.get('lat')} lng={first.get('lng')}", flush=True)
+
+    scraper_env_raw = os.getenv("ENABLE_GRUBHUB_SCRAPER", "")
+    scraper_on = scraper_env_raw.lower() in ("1", "true", "yes")
+    print(f"[menu-proposals] ENABLE_GRUBHUB_SCRAPER={scraper_env_raw!r} -> scraper_on={scraper_on}", flush=True)
+    print(f"[menu-proposals] processing {n} restaurants: {[s.get('name') for s in slim]}", flush=True)
+
     if scraper_on:
         # Resolve any manually-specified or env-var Grubhub URLs (used as fallback only)
         fallback_urls = _resolve_grubhub_urls(restaurants, n, payload)
@@ -828,6 +858,8 @@ async def menu_proposals(request: Request):
             except (TypeError, ValueError):
                 lat = lng = None
 
+            print(f"[menu-proposals] [{i}] '{name}' | address={address!r} | lat={lat} lng={lng} | fallback_url={fallback_urls[i]!r}", flush=True)
+
             fm: dict[str, list[dict[str, Any]]] = {}
             # Primary: API-based search + fetch (no Selenium needed)
             if name:
@@ -835,20 +867,30 @@ async def menu_proposals(request: Request):
                     fm = await run_in_threadpool(
                         _fetch_grubhub_menu_for_restaurant, name, address or None, lat, lng
                     )
-                except Exception:
+                except Exception as e:
+                    print(f"[menu-proposals] [{i}] API fetch exception: {e}", flush=True)
                     fm = {}
+
+            print(f"[menu-proposals] [{i}] API fetch returned {sum(len(v) for v in fm.values())} items across {len(fm)} categories", flush=True)
 
             # Fallback: Selenium scrape if we have a known URL and API returned nothing
             if not fm and fallback_urls[i]:
+                print(f"[menu-proposals] [{i}] falling back to Selenium for url={fallback_urls[i]!r}", flush=True)
                 try:
                     fm = await run_in_threadpool(_scrape_grubhub_menu_by_url, fallback_urls[i])
-                except Exception:
+                except Exception as e:
+                    print(f"[menu-proposals] [{i}] Selenium fallback exception: {e}", flush=True)
                     fm = {}
 
             if fm:
                 items = _full_menu_to_proposed_items(fm, max_items=5)
+                print(f"[menu-proposals] [{i}] converted to {len(items)} proposed items", flush=True)
                 if len(items) >= 3:
                     scraped_by_index[i] = items
+                else:
+                    print(f"[menu-proposals] [{i}] only {len(items)} items (need >=3), discarding", flush=True)
+            else:
+                print(f"[menu-proposals] [{i}] no menu data from scraper, will use LLM fallback", flush=True)
 
     parsed = _llm_menu_json(slim)
     menus_raw = parsed.get("menus") if isinstance(parsed, dict) else None
