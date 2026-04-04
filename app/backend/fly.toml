@@ -10,6 +10,8 @@ primary_region = 'iad'
 
 [env]
   DEMO_MAX_RESTAURANTS = '3'
+  ENABLE_GRUBHUB_SCRAPER = 'true'
+  DISABLE_GEMINI_GRUBHUB_URL_LOOKUP = 'true'
 
 [build]
   dockerfile = 'Dockerfile'
