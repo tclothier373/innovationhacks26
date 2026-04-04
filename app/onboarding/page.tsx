@@ -87,20 +87,20 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-grubr-cream">
+    <div className="flex min-h-screen flex-col bg-transparent">
       <GrubrHeader />
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 py-8">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
+        <h1 className="text-2xl font-bold tracking-tight text-white">
           Tell us a bit about yourself
         </h1>
-        <p className="mt-2 text-sm leading-relaxed text-grubr-muted">
+        <p className="mt-2 text-sm leading-relaxed text-white/85">
           We will use this to tune dish ideas near you. You can change it anytime
           by resetting from the swipe screen.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-8">
           <section>
-            <h2 className="text-sm font-semibold text-foreground">
+            <h2 className="text-sm font-semibold text-white">
               Dietary restrictions
             </h2>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -116,8 +116,8 @@ export default function OnboardingPage() {
                     onClick={() => toggleDietary(opt)}
                     className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                       active
-                        ? "border-grubr-orange bg-grubr-orange-light text-grubr-orange-dark"
-                        : "border-grubr-border bg-white text-foreground hover:border-grubr-orange/40"
+                        ? "border-white bg-white text-grubr-orange shadow-sm"
+                        : "border-white/30 bg-white/10 text-white hover:bg-white/15"
                     }`}
                   >
                     {opt}
@@ -130,7 +130,7 @@ export default function OnboardingPage() {
           <section>
             <label
               htmlFor="favorite"
-              className="text-sm font-semibold text-foreground"
+              className="text-sm font-semibold text-white"
             >
               Favorite kind of food
             </label>
@@ -140,16 +140,16 @@ export default function OnboardingPage() {
               value={favoriteFood}
               onChange={(e) => setFavoriteFood(e.target.value)}
               placeholder="e.g. spicy noodles, sushi, brunch"
-              className="mt-2 w-full rounded-lg border border-grubr-border bg-white px-3 py-2.5 text-sm outline-none ring-grubr-orange/30 placeholder:text-grubr-muted focus:border-grubr-orange focus:ring-2"
+              className="mt-2 w-full rounded-lg border border-grubr-border-surface bg-grubr-surface px-3 py-2.5 text-sm text-grubr-ink outline-none ring-white/30 placeholder:text-grubr-muted-ink focus:border-white focus:ring-2"
             />
           </section>
 
           <section>
             <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-foreground">
+              <label className="text-sm font-semibold text-white">
                 Search radius
               </label>
-              <span className="text-sm font-bold text-grubr-orange">
+              <span className="text-sm font-bold text-white">
                 {radiusMiles} mi
               </span>
             </div>
@@ -159,15 +159,15 @@ export default function OnboardingPage() {
               max={25}
               value={radiusMiles}
               onChange={(e) => setRadiusMiles(Number(e.target.value))}
-              className="mt-3 h-2 w-full cursor-pointer appearance-none rounded-full bg-grubr-orange-light accent-grubr-orange"
+              className="mt-3 h-2 w-full cursor-pointer appearance-none rounded-full bg-white/25 accent-white"
             />
-            <p className="mt-1 text-xs text-grubr-muted">
+            <p className="mt-1 text-xs text-white/75">
               Restaurants within this distance of you
             </p>
           </section>
 
           <section>
-            <h2 className="text-sm font-semibold text-foreground">
+            <h2 className="text-sm font-semibold text-white">
               Typical price range
             </h2>
             <div className="mt-3 grid grid-cols-4 gap-2">
@@ -178,8 +178,8 @@ export default function OnboardingPage() {
                   onClick={() => setPriceLevel(n)}
                   className={`rounded-lg border py-2.5 text-center text-sm font-bold transition-colors ${
                     priceLevel === n
-                      ? "border-grubr-orange bg-grubr-orange text-white"
-                      : "border-grubr-border bg-white text-foreground hover:border-grubr-orange/50"
+                      ? "border-white bg-white text-grubr-orange shadow-sm"
+                      : "border-white/30 bg-white/10 text-white hover:bg-white/20"
                   }`}
                   aria-pressed={priceLevel === n}
                 >
@@ -190,15 +190,15 @@ export default function OnboardingPage() {
           </section>
 
           <section>
-            <h2 className="text-sm font-semibold text-foreground">Location</h2>
-            <p className="mt-1 text-xs text-grubr-muted">
+            <h2 className="text-sm font-semibold text-white">Location</h2>
+            <p className="mt-1 text-xs text-white/75">
               We only use this on your device for now to center recommendations.
             </p>
             <button
               type="button"
               onClick={requestLocation}
               disabled={locStatus === "loading"}
-              className="mt-3 w-full rounded-lg border border-grubr-border bg-white py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-grubr-cream disabled:opacity-60"
+              className="mt-3 w-full rounded-lg border border-white/40 bg-white py-2.5 text-sm font-semibold text-grubr-orange shadow-sm transition-colors hover:bg-white/90 disabled:opacity-60"
             >
               {locStatus === "loading"
                 ? "Requesting location…"
@@ -207,13 +207,13 @@ export default function OnboardingPage() {
                   : "Use my current location"}
             </button>
             {location && (
-              <p className="mt-2 text-xs text-grubr-muted">
+              <p className="mt-2 text-xs text-white/80">
                 {location.label} — {location.lat.toFixed(3)},{" "}
                 {location.lng.toFixed(3)}
               </p>
             )}
             {error && (
-              <p className="mt-2 text-xs text-amber-800" role="alert">
+              <p className="mt-2 text-xs text-amber-100" role="alert">
                 {error}
               </p>
             )}
@@ -221,7 +221,7 @@ export default function OnboardingPage() {
 
           <button
             type="submit"
-            className="rounded-lg bg-grubr-orange py-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-grubr-orange-dark"
+            className="rounded-lg bg-white py-3 text-sm font-bold text-grubr-orange shadow-md transition-colors hover:bg-white/90"
           >
             Start swiping
           </button>

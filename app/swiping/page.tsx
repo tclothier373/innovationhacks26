@@ -176,23 +176,23 @@ export default function SwipingPage() {
 
   if (!isClient || !profile) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-grubr-cream">
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-grubr-orange border-t-transparent" />
+      <div className="flex min-h-screen items-center justify-center bg-transparent">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-white border-t-transparent" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-grubr-cream">
+    <div className="flex min-h-screen flex-col bg-transparent">
       <GrubrHeader />
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 lg:flex-row lg:gap-6">
         {/* Left: suggestions */}
         <aside className="order-2 flex w-full flex-col gap-3 lg:order-1 lg:w-64 lg:shrink-0">
-          <h2 className="text-xs font-bold uppercase tracking-wide text-grubr-muted">
+          <h2 className="text-xs font-bold uppercase tracking-wide text-white/75">
             For you
           </h2>
           {suggestions.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-grubr-border bg-white p-4 text-sm text-grubr-muted">
+            <div className="rounded-xl border border-dashed border-white/35 bg-grubr-surface p-4 text-sm text-grubr-muted-ink">
               Like {LIKES_THRESHOLD_SUGGEST}+ dishes you are into from the same
               spot and we will spotlight that restaurant here.
             </div>
@@ -201,10 +201,10 @@ export default function SwipingPage() {
               {suggestions.map((r) => (
                 <li
                   key={r.id}
-                  className="rounded-xl border border-grubr-border bg-white p-4 shadow-sm"
+                  className="rounded-xl border border-grubr-border-surface bg-grubr-surface p-4 shadow-md"
                 >
-                  <p className="font-bold text-foreground">{r.name}</p>
-                  <p className="mt-1 text-xs text-grubr-muted">{r.cuisine}</p>
+                  <p className="font-bold text-grubr-ink">{r.name}</p>
+                  <p className="mt-1 text-xs text-grubr-muted-ink">{r.cuisine}</p>
                   <p className="mt-2 text-xs font-medium text-grubr-orange">
                     You liked {swipeState.restaurantLikes[r.id] ?? 0} dishes
                     here
@@ -212,7 +212,7 @@ export default function SwipingPage() {
                   <div className="mt-3 flex flex-col gap-2">
                     <button
                       type="button"
-                      className="rounded-lg bg-grubr-orange py-2 text-xs font-bold text-white hover:bg-grubr-orange-dark"
+                      className="rounded-lg bg-grubr-orange py-2 text-xs font-bold text-white shadow-sm hover:bg-grubr-orange-dark"
                       onClick={() =>
                         alert(
                           `${r.name} — order flow would open here in the full product.`,
@@ -223,7 +223,7 @@ export default function SwipingPage() {
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg border border-grubr-border py-2 text-xs font-semibold text-foreground hover:bg-grubr-cream"
+                      className="rounded-lg border border-grubr-border-surface bg-white/90 py-2 text-xs font-semibold text-grubr-ink hover:bg-grubr-surface"
                       onClick={() => {}}
                     >
                       No, keep swiping
@@ -236,7 +236,7 @@ export default function SwipingPage() {
           <button
             type="button"
             onClick={handleReset}
-            className="mt-auto rounded-lg border border-red-200 bg-red-50 py-2 text-xs font-semibold text-red-800 hover:bg-red-100"
+            className="mt-auto rounded-lg border border-white/40 bg-white/15 py-2 text-xs font-semibold text-white backdrop-blur-sm hover:bg-white/25"
           >
             Reset data & memory
           </button>
@@ -246,10 +246,10 @@ export default function SwipingPage() {
         <section className="order-1 flex min-h-0 flex-1 flex-col items-center lg:order-2">
           {!current ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-              <p className="text-lg font-semibold text-foreground">
+              <p className="text-lg font-semibold text-white">
                 You are caught up for now
               </p>
-              <p className="max-w-md text-sm text-grubr-muted">
+              <p className="max-w-md text-sm text-white/80">
                 Tweak the prompt on the right or reset data to see more demo
                 dishes.
               </p>
@@ -265,7 +265,7 @@ export default function SwipingPage() {
                   setQueue(items);
                   setIndex(0);
                 }}
-                className="rounded-lg bg-grubr-orange px-4 py-2 text-sm font-bold text-white"
+                className="rounded-lg bg-white px-4 py-2 text-sm font-bold text-grubr-orange shadow-md hover:bg-white/90"
               >
                 Replay demo dishes
               </button>
@@ -275,7 +275,7 @@ export default function SwipingPage() {
               <div className="flex w-full max-w-md flex-1 flex-col gap-4 sm:flex-row sm:items-stretch sm:justify-center">
                 <div
                   ref={cardRef}
-                  className="relative flex min-h-[340px] flex-1 touch-pan-y flex-col overflow-hidden rounded-2xl border border-grubr-border bg-white shadow-md"
+                  className="relative flex min-h-[340px] flex-1 touch-pan-y flex-col overflow-hidden rounded-2xl border border-grubr-border-surface bg-grubr-surface shadow-lg"
                   style={{
                     transform: `translateX(${dragX}px) rotate(${dragX * 0.05}deg)`,
                     transition: dragging ? "none" : "transform 0.2s ease-out",
@@ -285,7 +285,7 @@ export default function SwipingPage() {
                   onPointerUp={onPointerUp}
                   onPointerCancel={onPointerUp}
                 >
-                  <div className="h-40 bg-gradient-to-br from-grubr-orange-light via-white to-amber-50" />
+                  <div className="h-40 bg-gradient-to-br from-white/30 via-grubr-surface to-orange-100" />
                   <div className="flex flex-1 flex-col p-5">
                     {restaurant && (
                       <div className="mb-3 flex items-start justify-between gap-2">
@@ -295,23 +295,23 @@ export default function SwipingPage() {
                           </p>
                           <div className="mt-1 flex items-center gap-2">
                             <StarRow value={restaurant.stars} />
-                            <span className="text-sm font-bold text-foreground">
+                            <span className="text-sm font-bold text-grubr-ink">
                               {restaurant.stars.toFixed(1)}
                             </span>
-                            <span className="text-xs text-grubr-muted">
+                            <span className="text-xs text-grubr-muted-ink">
                               ({restaurant.reviewCount})
                             </span>
                           </div>
                         </div>
                       </div>
                     )}
-                    <h3 className="text-xl font-bold leading-tight text-foreground">
+                    <h3 className="text-xl font-bold leading-tight text-grubr-ink">
                       {current.name}
                     </h3>
-                    <p className="mt-2 flex-1 text-sm leading-relaxed text-grubr-muted">
+                    <p className="mt-2 flex-1 text-sm leading-relaxed text-grubr-muted-ink">
                       {current.description}
                     </p>
-                    <p className="mt-3 text-xs text-grubr-muted">
+                    <p className="mt-3 text-xs text-grubr-muted-ink">
                       Drag card right to like, left to pass — after you pick a
                       mood below.
                     </p>
@@ -319,7 +319,7 @@ export default function SwipingPage() {
                 </div>
 
                 <div className="flex flex-col items-center justify-center gap-1 sm:w-14">
-                  <span className="mb-1 text-[10px] font-bold uppercase tracking-wide text-grubr-muted">
+                  <span className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white/75">
                     Mood
                   </span>
                   <div className="flex flex-col gap-1.5">
@@ -333,8 +333,8 @@ export default function SwipingPage() {
                           title={label}
                           className={`flex h-11 w-11 items-center justify-center rounded-xl border-2 text-xl transition-all ${
                             active
-                              ? "border-grubr-orange bg-grubr-orange-light scale-110"
-                              : "border-grubr-border bg-white hover:border-grubr-orange/40"
+                              ? "scale-110 border-white bg-white shadow-md"
+                              : "border-white/35 bg-white/10 hover:border-white/60 hover:bg-white/15"
                           }`}
                           aria-label={label}
                         >
@@ -351,7 +351,7 @@ export default function SwipingPage() {
                   type="button"
                   onClick={onPass}
                   disabled={selectedRating === null}
-                  className="flex-1 rounded-xl border-2 border-grubr-border bg-white py-3 text-sm font-bold text-grubr-muted transition-colors hover:bg-grubr-cream disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex-1 rounded-xl border-2 border-white/40 bg-white/10 py-3 text-sm font-bold text-white backdrop-blur-sm transition-colors hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Pass
                 </button>
@@ -359,7 +359,7 @@ export default function SwipingPage() {
                   type="button"
                   onClick={onLike}
                   disabled={selectedRating === null}
-                  className="flex-1 rounded-xl bg-grubr-orange py-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-grubr-orange-dark disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex-1 rounded-xl bg-white py-3 text-sm font-bold text-grubr-orange shadow-md transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Like
                 </button>
@@ -370,10 +370,10 @@ export default function SwipingPage() {
 
         {/* Right: prompt */}
         <aside className="order-3 w-full lg:w-72 lg:shrink-0">
-          <h2 className="text-xs font-bold uppercase tracking-wide text-grubr-muted">
+          <h2 className="text-xs font-bold uppercase tracking-wide text-white/75">
             Food mood
           </h2>
-          <p className="mt-1 text-xs text-grubr-muted">
+          <p className="mt-1 text-xs text-white/80">
             Tell Grubr how you feel — demo filters adjust the dish list.
           </p>
           <textarea
@@ -381,12 +381,12 @@ export default function SwipingPage() {
             onChange={(e) => setPromptDraft(e.target.value)}
             placeholder='e.g. "I am feeling Mediterranean right now" or "I do not really want Mexican food"'
             rows={6}
-            className="mt-3 w-full resize-none rounded-xl border border-grubr-border bg-white p-3 text-sm outline-none ring-grubr-orange/30 placeholder:text-grubr-muted focus:border-grubr-orange focus:ring-2"
+            className="mt-3 w-full resize-none rounded-xl border border-grubr-border-surface bg-grubr-surface p-3 text-sm text-grubr-ink outline-none ring-white/30 placeholder:text-grubr-muted-ink focus:border-white focus:ring-2"
           />
           <button
             type="button"
             onClick={applyPrompt}
-            className="mt-3 w-full rounded-lg bg-grubr-orange py-2.5 text-sm font-bold text-white hover:bg-grubr-orange-dark"
+            className="mt-3 w-full rounded-lg bg-white py-2.5 text-sm font-bold text-grubr-orange shadow-md hover:bg-white/90"
           >
             Update context
           </button>

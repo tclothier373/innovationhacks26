@@ -3,14 +3,23 @@
 :root {
   --grubhub-orange: #ff8000;
   --grubhub-orange-dark: #e67300;
-  --grubhub-orange-light: #fff4e6;
-  --grubhub-text: #2b2b2b;
-  --grubhub-muted: #6b6b6b;
-  --grubhub-border: #e5e5e5;
-  --grubhub-bg: #ffffff;
-  --grubhub-cream: #fafafa;
-  --background: var(--grubhub-bg);
-  --foreground: var(--grubhub-text);
+  /* Subtle lift on orange (was cream tint; now frosted white on orange) */
+  --grubhub-orange-light: rgba(255, 255, 255, 0.16);
+  /* Page = orange field */
+  --grubhub-page: #ff7a00;
+  --grubhub-page-deep: #f55d00;
+  /* White highlight surfaces */
+  --grubhub-surface: #ffffff;
+  --grubhub-ink: #1f1f1f;
+  --grubhub-muted-ink: #6b6b6b;
+  /* Text on orange */
+  --grubhub-text-on-orange: #ffffff;
+  --grubhub-muted-on-orange: rgba(255, 255, 255, 0.82);
+  /* Borders */
+  --grubhub-border-on-orange: rgba(255, 255, 255, 0.28);
+  --grubhub-border-on-surface: #e8e8e8;
+  --background: var(--grubhub-page);
+  --foreground: var(--grubhub-text-on-orange);
 }
 
 @theme inline {
@@ -20,13 +29,26 @@
   --color-grubr-orange: var(--grubhub-orange);
   --color-grubr-orange-dark: var(--grubhub-orange-dark);
   --color-grubr-orange-light: var(--grubhub-orange-light);
-  --color-grubr-muted: var(--grubhub-muted);
-  --color-grubr-border: var(--grubhub-border);
-  --color-grubr-cream: var(--grubhub-cream);
+  /* Page background (orange) — replaces old “cream” */
+  --color-grubr-cream: var(--grubhub-page);
+  --color-grubr-page: var(--grubhub-page);
+  --color-grubr-page-deep: var(--grubhub-page-deep);
+  --color-grubr-surface: var(--grubhub-surface);
+  --color-grubr-ink: var(--grubhub-ink);
+  --color-grubr-muted-ink: var(--grubhub-muted-ink);
+  --color-grubr-muted: var(--grubhub-muted-on-orange);
+  --color-grubr-border: var(--grubhub-border-on-orange);
+  --color-grubr-border-surface: var(--grubhub-border-on-surface);
 }
 
 body {
-  background: var(--grubhub-cream);
-  color: var(--grubhub-text);
+  min-height: 100vh;
+  background: linear-gradient(
+    165deg,
+    var(--grubhub-orange) 0%,
+    var(--grubhub-page) 42%,
+    var(--grubhub-page-deep) 100%
+  );
+  color: var(--grubhub-text-on-orange);
   font-family: var(--font-grubr), system-ui, -apple-system, sans-serif;
 }

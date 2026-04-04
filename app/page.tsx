@@ -16,13 +16,13 @@ export default function Home() {
   }, [router]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-grubr-cream">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-transparent">
       <div className="flex flex-col items-center gap-3">
         <div
-          className="h-10 w-10 animate-spin rounded-full border-2 border-grubr-orange border-t-transparent"
+          className="h-10 w-10 animate-spin rounded-full border-2 border-white border-t-transparent"
           aria-hidden
         />
-        <p className="text-sm font-medium text-grubr-muted">Loading…</p>
+        <p className="text-sm font-medium text-white/85">Loading…</p>
       </div>
     </div>
   );
