@@ -477,11 +477,18 @@ def _resolve_photo_url(photo_reference: str, api_key: str) -> Optional[str]:
 
 def _scrape_website_menu(url: str) -> list[dict[str, Any]]:
     """
-    Scrape a restaurant website for menu items using JSON-LD schema.org/Menu.
+    Scrape a restaurant website for menu items.
+    Strategy order: JSON-LD schema → HTML heuristics (CSS classes, headings+prices).
     Returns list of {name, description, image_url} dicts.
     """
+    import re as _re
     from bs4 import BeautifulSoup
     from urllib.parse import urljoin
+
+    _PRICE_RE = _re.compile(r"\$\s*\d+")
+    _SKIP_WORDS = {"menu", "home", "about", "contact", "reservation", "reservations",
+                   "hours", "location", "directions", "gift", "careers", "press"}
+    _SKIP_CONTAINERS = {"nav", "header", "footer", "sidebar", "widget", "breadcrumb", "social"}
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -489,16 +496,16 @@ def _scrape_website_menu(url: str) -> list[dict[str, Any]]:
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    def _fetch_and_parse(fetch_url: str) -> tuple[Optional[Any], str]:
+    def _fetch(fetch_url: str) -> tuple[Optional[Any], str]:
         try:
             r = requests.get(fetch_url, headers=headers, timeout=12, allow_redirects=True)
             if r.ok:
                 return BeautifulSoup(r.text, "html.parser"), r.url
         except Exception as e:
-            print(f"[website-scrape] fetch {fetch_url} exception: {e}", flush=True)
+            print(f"[website-scrape] fetch {fetch_url}: {e}", flush=True)
         return None, fetch_url
 
-    def _extract_jsonld_items(soup: Any) -> list[dict]:
+    def _jsonld_items(soup: Any) -> list[dict]:
         found: list[dict] = []
         for script in soup.find_all("script", type="application/ld+json"):
             try:
@@ -535,57 +542,368 @@ def _scrape_website_menu(url: str) -> list[dict[str, Any]]:
                                     continue
                                 desc = str(item.get("description") or "").strip()
                                 img_raw = item.get("image")
-                                img = None
-                                if isinstance(img_raw, str):
-                                    img = img_raw
-                                elif isinstance(img_raw, dict):
-                                    img = img_raw.get("url") or img_raw.get("@id")
+                                img = img_raw if isinstance(img_raw, str) else (
+                                    img_raw.get("url") if isinstance(img_raw, dict) else None
+                                )
                                 found.append({"name": name, "description": desc, "image_url": img})
                     elif typ == "MenuItem":
                         name = str(node.get("name") or "").strip()
                         if name:
                             desc = str(node.get("description") or "").strip()
-                            img_raw = node.get("image")
-                            img = img_raw if isinstance(img_raw, str) else None
-                            found.append({"name": name, "description": desc, "image_url": img})
+                            found.append({"name": name, "description": desc, "image_url": None})
             except Exception:
                 continue
         return found
 
+    def _html_items(soup: Any) -> list[dict]:
+        """Heuristic HTML extraction: CSS class patterns then heading+price scan."""
+        # Pattern 1: common menu-item CSS classes
+        class_patterns = [
+            "menu-item", "menu_item", "menuitem", "food-item", "food_item",
+            "dish", "menu-list-item", "menu-entry", "food-menu-item",
+            "menu-product", "menu-content-item", "wprmenu_item",
+        ]
+        for pat in class_patterns:
+            els = soup.find_all(class_=_re.compile(pat, _re.I))
+            if len(els) >= 3:
+                results: list[dict] = []
+                for el in els[:10]:
+                    name_el = el.find(["h2", "h3", "h4", "h5", "strong", "b"]) or el
+                    name = name_el.get_text(strip=True)[:100]
+                    if not name or len(name) < 3:
+                        continue
+                    desc_el = el.find("p")
+                    desc = desc_el.get_text(strip=True)[:200] if desc_el else ""
+                    img_el = el.find("img")
+                    img = img_el.get("src") if img_el else None
+                    results.append({"name": name, "description": desc, "image_url": img})
+                if len(results) >= 3:
+                    print(f"[website-scrape] CSS class '{pat}' → {len(results)} items", flush=True)
+                    return results[:8]
+
+        # Pattern 2: headings inside price-bearing containers
+        for container in soup.find_all(["section", "article", "div", "ul"], limit=200):
+            cls_id = " ".join(container.get("class") or []) + " " + (container.get("id") or "")
+            cls_id = cls_id.lower()
+            if any(s in cls_id for s in _SKIP_CONTAINERS):
+                continue
+            if not _PRICE_RE.search(container.get_text()):
+                continue
+            headings = container.find_all(["h3", "h4", "h5", "strong"])
+            if len(headings) < 3:
+                continue
+            batch: list[dict] = []
+            for h in headings[:12]:
+                name = h.get_text(strip=True)[:100]
+                if not name or len(name) < 3 or len(name) > 80:
+                    continue
+                # Filter navigation-like text
+                if name.lower() in _SKIP_WORDS or name.lower().startswith(("$", "©")):
+                    continue
+                desc = ""
+                nxt = h.find_next_sibling(["p", "span", "div"])
+                if nxt:
+                    d = nxt.get_text(strip=True)[:200]
+                    if 4 < len(d) < 300:
+                        desc = d
+                img_el = h.find("img") or (nxt.find("img") if nxt else None)
+                img = img_el.get("src") if img_el else None
+                batch.append({"name": name, "description": desc, "image_url": img})
+            if len(batch) >= 3:
+                print(f"[website-scrape] heading+price heuristic → {len(batch)} items", flush=True)
+                return batch[:8]
+
+        return []
+
+    def _menu_links(soup: Any, base_url: str) -> list[str]:
+        """Find candidate menu page URLs on the page, skipping PDFs and external sites."""
+        from urllib.parse import urlparse
+        base_host = urlparse(base_url).netloc
+        seen: set[str] = set()
+        links: list[str] = []
+        for a in soup.find_all("a", href=True):
+            href = str(a["href"]).strip()
+            if not href or href.startswith("#"):
+                continue
+            full = href if href.startswith("http") else urljoin(base_url, href)
+            # Skip PDFs
+            if full.lower().endswith(".pdf"):
+                continue
+            # Skip external domains
+            if urlparse(full).netloc not in ("", base_host):
+                continue
+            text = (a.get_text(strip=True) or "").lower()
+            path = full.lower()
+            if "menu" in text or "/menu" in path:
+                if full not in seen and full != base_url:
+                    seen.add(full)
+                    links.append(full)
+        return links[:4]
+
     print(f"[website-scrape] fetching {url}", flush=True)
-    soup, final_url = _fetch_and_parse(url)
+    soup, final_url = _fetch(url)
     if soup is None:
         return []
 
-    items = _extract_jsonld_items(soup)
-    if items:
-        print(f"[website-scrape] {len(items)} items via JSON-LD on homepage", flush=True)
+    # 1. Try JSON-LD on homepage
+    items = _jsonld_items(soup)
+    if len(items) >= 3:
+        print(f"[website-scrape] {len(items)} items via JSON-LD (homepage)", flush=True)
         return items[:8]
 
-    # Try following a /menu link on the page
-    menu_link: Optional[str] = None
-    for a in soup.find_all("a", href=True):
-        text = (a.get_text(strip=True) or "").lower()
-        href = str(a["href"]).strip()
-        if href.startswith("#") or not href:
+    # 2. Try HTML heuristics on homepage
+    items = _html_items(soup)
+    if len(items) >= 3:
+        print(f"[website-scrape] {len(items)} items via HTML heuristics (homepage)", flush=True)
+        return items[:8]
+
+    # 3. Follow menu links and try both strategies on each
+    for menu_url in _menu_links(soup, final_url):
+        print(f"[website-scrape] trying menu page: {menu_url}", flush=True)
+        msoup, _ = _fetch(menu_url)
+        if msoup is None:
             continue
-        if "menu" in text or "menu" in href.lower():
-            full = href if href.startswith("http") else urljoin(final_url, href)
-            if full != final_url:
-                menu_link = full
-                break
+        items = _jsonld_items(msoup)
+        if len(items) >= 3:
+            print(f"[website-scrape] {len(items)} items via JSON-LD ({menu_url})", flush=True)
+            return items[:8]
+        items = _html_items(msoup)
+        if len(items) >= 3:
+            print(f"[website-scrape] {len(items)} items via HTML heuristics ({menu_url})", flush=True)
+            return items[:8]
 
-    if menu_link:
-        print(f"[website-scrape] following menu link: {menu_link}", flush=True)
-        menu_soup, _ = _fetch_and_parse(menu_link)
-        if menu_soup:
-            items = _extract_jsonld_items(menu_soup)
-            if items:
-                print(f"[website-scrape] {len(items)} items via JSON-LD on menu page", flush=True)
-                return items[:8]
+    # 4. Also try common menu URL suffixes if not found yet
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(final_url)
+    base = urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
+    for suffix in ["/menu", "/menus", "/our-menu", "/food-menu", "/dining"]:
+        candidate = base + suffix
+        if candidate == final_url:
+            continue
+        print(f"[website-scrape] trying common path: {candidate}", flush=True)
+        msoup, _ = _fetch(candidate)
+        if msoup is None:
+            continue
+        items = _jsonld_items(msoup) or _html_items(msoup)
+        if len(items) >= 3:
+            print(f"[website-scrape] {len(items)} items at {candidate}", flush=True)
+            return items[:8]
 
-    print(f"[website-scrape] no structured menu items found for {url}", flush=True)
+    print(f"[website-scrape] no menu items found for {url}", flush=True)
     return []
+
+
+def _gemini_validate_menu_items(
+    raw_items: list[dict[str, Any]], restaurant: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """
+    Ask Gemini to filter scraped items down to actual food/drink menu items only.
+    Returns validated items, or empty list if fewer than 3 valid items found.
+    """
+    if not raw_items:
+        return []
+
+    restaurant_name = restaurant.get("name") or "this restaurant"
+    cuisine = restaurant.get("cuisine") or "restaurant"
+
+    items_payload = [
+        {"index": i, "name": it.get("name", ""), "description": it.get("description", "")}
+        for i, it in enumerate(raw_items)
+    ]
+
+    prompt = f"""You are reviewing text scraped from the website of "{restaurant_name}", a {cuisine} restaurant.
+
+Below are items extracted from their website. Identify which are ACTUAL food or drink menu items a customer could order.
+
+REJECT anything that is:
+- Navigation or UI text ("Home", "About", "Contact", "Reserve Now", "Book a Table", "Order Online")
+- Operating info ("Our Hours", "Open Daily", "Location", "Directions", "Parking", "Find Us")
+- Non-food content ("Gift Cards", "Catering", "Events", "Press", "Careers", "Private Dining")
+- Generic section headers without a specific dish name ("Appetizers", "Drinks", "Desserts")
+- Marketing copy or slogans
+
+ACCEPT only items with a SPECIFIC food or drink name that a customer could order (e.g. "Spicy Tuna Roll", "Chicken Tikka Masala", "House Margarita").
+
+Items to evaluate:
+{json.dumps(items_payload, ensure_ascii=False)}
+
+Return ONLY valid JSON:
+{{
+  "valid": [
+    {{"index": 0, "name": "corrected dish name", "description": "description or empty string"}}
+  ]
+}}
+Include at most 5 items. If fewer than 3 are genuine menu items, return {{"valid": []}}.
+"""
+
+    parsed: Optional[dict] = None
+    for model in [_genai_model, _vertex_model]:
+        if model is None:
+            continue
+        try:
+            r = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+            )
+            parsed = _parse_json_from_model(getattr(r, "text", "") or "")
+            break
+        except Exception as e:
+            print(f"[gemini-validate] error: {e}", flush=True)
+
+    if not isinstance(parsed, dict):
+        print("[gemini-validate] no LLM available, returning empty", flush=True)
+        return []
+
+    valid = parsed.get("valid")
+    if not isinstance(valid, list) or len(valid) < 3:
+        return []
+
+    result: list[dict[str, Any]] = []
+    for entry in valid[:5]:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        orig_idx = entry.get("index")
+        original = raw_items[orig_idx] if isinstance(orig_idx, int) and 0 <= orig_idx < len(raw_items) else {}
+        result.append({
+            "name": name[:120],
+            "description": (str(entry.get("description") or "").strip() or original.get("description", ""))[:280],
+            "image_url": original.get("image_url"),
+        })
+
+    return result
+
+
+@app.post("/discover")
+async def discover(request: Request):
+    """
+    Combined endpoint: fetch Places candidates, scrape + Gemini-validate menus,
+    skip restaurants with < 3 real items, return first N with valid menus.
+    Response shape: {data: [...restaurant rows...], menus: [...item arrays...], source: str}
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"data": [], "menus": [], "source": "error"}
+
+    if not PLACES_API_KEY:
+        return {"data": [], "menus": [], "source": "error", "error": "No API key configured"}
+
+    query = str(payload.get("query") or "restaurants")
+    lat = payload.get("lat")
+    lng = payload.get("lng")
+    radius_meters = int(payload.get("radius_meters") or 8000)
+
+    # Fetch up to 15 candidates so we can cycle past ones with no menu
+    if lat is not None and lng is not None:
+        places, status, err = get_restaurants_nearby(
+            float(lat), float(lng), radius_meters, query, PLACES_API_KEY
+        )
+    else:
+        places, status, err = get_restaurants_text_search(query, PLACES_API_KEY)
+
+    if err:
+        return {"data": [], "menus": [], "source": "error", "error": err, "places_status": status}
+
+    WANT = _demo_max_restaurants()
+    MAX_CANDIDATES = min(len(places), 15)
+    candidates = places[:MAX_CANDIDATES]
+
+    # Batch-enrich all candidates in one LLM call
+    enrichments = enrich_restaurants_batch(candidates)
+
+    accepted_rows: list[dict[str, Any]] = []
+    accepted_menus: list[list[dict[str, Any]]] = []
+
+    for i, (place, enrich) in enumerate(zip(candidates, enrichments)):
+        if len(accepted_rows) >= WANT:
+            break
+
+        place_id = (place.get("place_id") or "").strip()
+        name = (place.get("name") or f"Restaurant {i + 1}").strip()
+
+        if not place_id:
+            print(f"[discover] [{i}] '{name}' — no place_id, skipping", flush=True)
+            continue
+
+        # Fetch website URL + photo references
+        details = await run_in_threadpool(_get_place_details, place_id, PLACES_API_KEY)
+        website: Optional[str] = details.get("website")
+        photo_refs: list[str] = [
+            p.get("photo_reference", "")
+            for p in (details.get("photos") or [])
+            if p.get("photo_reference")
+        ][:3]
+
+        if not website:
+            print(f"[discover] [{i}] '{name}' — no website, skipping", flush=True)
+            continue
+
+        # Scrape raw items from their website
+        raw_items = await run_in_threadpool(_scrape_website_menu, website)
+        print(f"[discover] [{i}] '{name}' — scraped {len(raw_items)} raw items", flush=True)
+
+        if not raw_items:
+            print(f"[discover] [{i}] '{name}' — 0 scraped items, skipping", flush=True)
+            continue
+
+        # Validate with Gemini — filter out nav/UI junk
+        restaurant_ctx = {"name": name, "cuisine": enrich.get("cuisine", "")}
+        valid_items = await run_in_threadpool(_gemini_validate_menu_items, raw_items, restaurant_ctx)
+        print(f"[discover] [{i}] '{name}' — {len(valid_items)} valid items after Gemini filter", flush=True)
+
+        if len(valid_items) < 3:
+            print(f"[discover] [{i}] '{name}' — not enough valid items, skipping", flush=True)
+            continue
+
+        # Resolve photo URLs
+        photo_urls: list[str] = []
+        for ref in photo_refs:
+            url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
+            if url:
+                photo_urls.append(url)
+
+        # Build menu with image assignment
+        menu: list[dict[str, Any]] = []
+        for j, item in enumerate(valid_items[:5]):
+            menu.append({
+                "name": item["name"],
+                "description": item.get("description") or "Popular pick.",
+                "tags": [],
+                "image_url": item.get("image_url") or (photo_urls[j % len(photo_urls)] if photo_urls else None),
+            })
+
+        # Build restaurant row (same shape as /restaurants)
+        geo = (place.get("geometry") or {}).get("location") or {}
+        row: dict[str, Any] = {
+            "place_id": place_id,
+            "name": name,
+            "rating": place.get("rating"),
+            "user_ratings_total": place.get("user_ratings_total"),
+            "price_level": place.get("price_level"),
+            "types": place.get("types"),
+            "vicinity": place.get("vicinity"),
+            "formatted_address": place.get("formatted_address"),
+            "lat": geo.get("lat"),
+            "lng": geo.get("lng"),
+            "cuisine": enrich.get("cuisine"),
+            "main_food": enrich.get("main_food"),
+            "price_range": enrich.get("price_range"),
+        }
+
+        accepted_rows.append(row)
+        accepted_menus.append(menu)
+        print(f"[discover] [{i}] '{name}' — ACCEPTED ({len(accepted_rows)}/{WANT})", flush=True)
+
+    print(f"[discover] done — accepted {len(accepted_rows)} restaurants", flush=True)
+    return {
+        "data": accepted_rows,
+        "menus": accepted_menus,
+        "source": "website" if accepted_rows else "empty",
+        "places_status": status,
+    }
 
 
 @app.post("/menu-proposals")

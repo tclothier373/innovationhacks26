@@ -39,8 +39,9 @@ import {
   type Restaurant,
 } from "@/lib/mock-food";
 import {
-  fetchPlacesWithProposedMenus,
+  mergeProposedMenusIntoRestaurants,
   type PlacesApiRestaurantRow,
+  type ProposedMenuItem,
 } from "@/lib/places-bridge";
 import { getCuisineVisual } from "@/lib/cuisine-utils";
 import { useIsClient } from "@/lib/use-is-client";
@@ -368,7 +369,7 @@ export default function SwipingPage() {
       const prof = getProfile();
 
       try {
-        const res = await fetch("/api/restaurants", {
+        const res = await fetch("/api/discover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -377,13 +378,13 @@ export default function SwipingPage() {
           }),
         });
         const rawText = await res.text();
-        let json: { data?: unknown; error?: string; hint?: string } = {};
+        let json: { data?: unknown; menus?: unknown; error?: string; hint?: string } = {};
         try {
           json = rawText ? (JSON.parse(rawText) as typeof json) : {};
         } catch {
           if (!cancelled) {
             setPlacesDiag({
-              error: `/api/restaurants returned invalid JSON (HTTP ${res.status}).`,
+              error: `/api/discover returned invalid JSON (HTTP ${res.status}).`,
               hint: rawText.slice(0, 160).replace(/\s+/g, " "),
             });
             json = { data: [] };
@@ -392,12 +393,11 @@ export default function SwipingPage() {
         if (cancelled) return;
 
         const rows = json.data;
+        const menus = json.menus;
         if (Array.isArray(rows) && rows.length > 0) {
-          const built = await fetchPlacesWithProposedMenus(
+          const built = mergeProposedMenusIntoRestaurants(
             rows as PlacesApiRestaurantRow[],
-            {
-              prototypeGrubhubUrls: prof?.prototypeGrubhubUrls,
-            },
+            Array.isArray(menus) ? (menus as ProposedMenuItem[][]) : [],
           );
           if (!cancelled) {
             setDynamicRestaurants(built);
@@ -456,7 +456,7 @@ export default function SwipingPage() {
     setContextRefreshing(true);
     setPlacesStatus("loading");
     try {
-      const res = await fetch("/api/restaurants", {
+      const res = await fetch("/api/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -465,23 +465,22 @@ export default function SwipingPage() {
         }),
       });
       const rawText = await res.text();
-      let json: { data?: unknown; error?: string; hint?: string } = {};
+      let json: { data?: unknown; menus?: unknown; error?: string; hint?: string } = {};
       try {
         json = rawText ? (JSON.parse(rawText) as typeof json) : {};
       } catch {
         setPlacesDiag({
-          error: `/api/restaurants returned invalid JSON (HTTP ${res.status}).`,
+          error: `/api/discover returned invalid JSON (HTTP ${res.status}).`,
           hint: rawText.slice(0, 160).replace(/\s+/g, " "),
         });
         json = { data: [] };
       }
       const rows = json.data;
+      const menus = json.menus;
       if (Array.isArray(rows) && rows.length > 0) {
-        const built = await fetchPlacesWithProposedMenus(
+        const built = mergeProposedMenusIntoRestaurants(
           rows as PlacesApiRestaurantRow[],
-          {
-            prototypeGrubhubUrls: getProfile()?.prototypeGrubhubUrls,
-          },
+          Array.isArray(menus) ? (menus as ProposedMenuItem[][]) : [],
         );
         setDynamicRestaurants(built);
         setPlacesStatus("ready");
