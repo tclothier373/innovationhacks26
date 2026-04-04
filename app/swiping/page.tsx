@@ -34,9 +34,14 @@ import {
   filterItemsByPrompt,
   getRestaurantById,
   LIKES_THRESHOLD_SUGGEST,
+  setDynamicRestaurants,
   type FoodItem,
   type Restaurant,
 } from "@/lib/mock-food";
+import {
+  mapPlacesApiToRestaurants,
+  type PlacesApiRestaurantRow,
+} from "@/lib/places-bridge";
 import { getCuisineVisual } from "@/lib/cuisine-utils";
 import { useIsClient } from "@/lib/use-is-client";
 
@@ -326,21 +331,71 @@ export default function SwipingPage() {
   >(() =>
     typeof window !== "undefined" ? getSuggestionDismissLikeCheckpoints() : {},
   );
+  const [placesStatus, setPlacesStatus] = useState<"loading" | "ready" | "fallback">(
+    "loading",
+  );
+  const [contextRefreshing, setContextRefreshing] = useState(false);
   const suggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const profile = useMemo(() => (isClient ? getProfile() : null), [isClient]);
 
   useEffect(() => {
     if (!isClient) return;
-    const s = getSwipeState();
-    if (!getProfile()) { router.replace("/onboarding"); return; }
-    const items = filterItemsByPrompt(s.contextPrompt, getProfile());
-    const unseen = items.filter((i) => !s.seenItemIds.includes(i.id));
-    queueMicrotask(() => {
-      setSwipeState(s);
-      setPromptDraft(s.contextPrompt);
-      setQueue(unseen.length ? unseen : items);
-    });
+    if (!getProfile()) {
+      router.replace("/onboarding");
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      setPlacesStatus("loading");
+      const s = getSwipeState();
+      const prof = getProfile();
+
+      try {
+        const res = await fetch("/api/restaurants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            profile: prof,
+            contextPrompt: s.contextPrompt,
+          }),
+        });
+        const json: { data?: unknown } = await res.json();
+        if (cancelled) return;
+
+        const rows = json.data;
+        if (Array.isArray(rows) && rows.length > 0) {
+          setDynamicRestaurants(
+            mapPlacesApiToRestaurants(rows as PlacesApiRestaurantRow[]),
+          );
+          setPlacesStatus("ready");
+        } else {
+          setDynamicRestaurants(null);
+          setPlacesStatus("fallback");
+        }
+      } catch {
+        if (!cancelled) {
+          setDynamicRestaurants(null);
+          setPlacesStatus("fallback");
+        }
+      }
+
+      if (cancelled) return;
+      const latest = getSwipeState();
+      const items = filterItemsByPrompt(latest.contextPrompt, getProfile());
+      const unseen = items.filter((i) => !latest.seenItemIds.includes(i.id));
+      queueMicrotask(() => {
+        setSwipeState(latest);
+        setPromptDraft(latest.contextPrompt);
+        setQueue(unseen.length ? unseen : items);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router, isClient]);
 
   /** Keep React state aligned with session checkpoints (hydration / remount safety). */
@@ -354,10 +409,38 @@ export default function SwipingPage() {
     saveSwipeState(next);
   }, []);
 
-  const applyPrompt = useCallback(() => {
+  const applyPrompt = useCallback(async () => {
     const prev = getSwipeState();
     const next: GrubrSwipeState = { ...prev, contextPrompt: promptDraft.trim() };
     persist(next);
+    setContextRefreshing(true);
+    setPlacesStatus("loading");
+    try {
+      const res = await fetch("/api/restaurants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile: getProfile(),
+          contextPrompt: next.contextPrompt,
+        }),
+      });
+      const json: { data?: unknown } = await res.json();
+      const rows = json.data;
+      if (Array.isArray(rows) && rows.length > 0) {
+        setDynamicRestaurants(
+          mapPlacesApiToRestaurants(rows as PlacesApiRestaurantRow[]),
+        );
+        setPlacesStatus("ready");
+      } else {
+        setDynamicRestaurants(null);
+        setPlacesStatus("fallback");
+      }
+    } catch {
+      setDynamicRestaurants(null);
+      setPlacesStatus("fallback");
+    } finally {
+      setContextRefreshing(false);
+    }
     const items = filterItemsByPrompt(next.contextPrompt, getProfile());
     const unseen = items.filter((i) => !next.seenItemIds.includes(i.id));
     setQueue(unseen.length ? unseen : items);
@@ -598,8 +681,23 @@ export default function SwipingPage() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.02, ...SPRING }}
-          className="flex flex-1 min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-4"
+          className="relative flex flex-1 min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-4"
         >
+          {placesStatus === "loading" && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#C82C00]/35 backdrop-blur-[2px]">
+              <div className="h-10 w-10 rounded-full border-[3px] border-white/25 border-t-white animate-spin-ring" />
+              <p className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-syne)" }}>
+                Grubr Agent is finding restaurants…
+              </p>
+            </div>
+          )}
+          {placesStatus === "fallback" && (
+            <p className="absolute top-2 left-1/2 z-10 max-w-md -translate-x-1/2 rounded-full border border-white/20 bg-black/20 px-4 py-1.5 text-center text-[11px] text-white/85 backdrop-blur-md">
+              Places API unavailable — showing sample restaurants. Run the Python backend and set{" "}
+              <code className="rounded bg-white/10 px-1">RESTAURANTS_API_URL</code> /{" "}
+              <code className="rounded bg-white/10 px-1">GOOGLE_MAPS_API_KEY</code>.
+            </p>
+          )}
           {!current || !restaurant ? (
             <motion.div
               className="flex flex-col items-center gap-3 text-center"
@@ -615,7 +713,7 @@ export default function SwipingPage() {
                 You&apos;re caught up
               </p>
               <p className="max-w-xs text-sm text-oo-m">
-                Adjust the Food Mood prompt or replay the demo dishes.
+                Adjust Food Mood or clear seen dishes to keep swiping.
               </p>
               <button
                 type="button"
@@ -627,7 +725,7 @@ export default function SwipingPage() {
                 }}
                 className="rounded-full bg-white px-7 py-2.5 text-sm font-bold text-brand shadow-xl transition-all hover:bg-s2 active:scale-[0.97]"
               >
-                Replay demo dishes
+                Show dishes again
               </button>
             </motion.div>
           ) : (
@@ -660,7 +758,12 @@ export default function SwipingPage() {
             <textarea
               value={promptDraft}
               onChange={(e) => setPromptDraft(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), applyPrompt())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void applyPrompt();
+                }
+              }}
               placeholder={"\"I'm feeling Mediterranean tonight\"\n\"No Mexican food today\"\n\"Something spicy and cheap\"\n\"Craving something warm\""}
               rows={7}
               className="w-full resize-none bg-transparent px-4 py-4 text-sm text-white placeholder:text-oo-xs outline-none leading-relaxed"
@@ -668,10 +771,11 @@ export default function SwipingPage() {
             <div className="border-t border-oo-xs px-3 py-3">
               <button
                 type="button"
-                onClick={applyPrompt}
-                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-brand shadow-md transition-all hover:bg-s2 active:scale-[0.98]"
+                disabled={contextRefreshing}
+                onClick={() => void applyPrompt()}
+                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-brand shadow-md transition-all hover:bg-s2 active:scale-[0.98] disabled:opacity-60"
               >
-                Update context ↵
+                {contextRefreshing ? "Updating…" : "Update context ↵"}
               </button>
             </div>
           </div>

@@ -17,7 +17,22 @@ export type Restaurant = {
   items: FoodItem[];
 };
 
-/** Demo data — replace with API in production */
+/** When set (e.g. after Google Places fetch), discovery uses these instead of static RESTAURANTS. */
+let dynamicRestaurants: Restaurant[] | null = null;
+
+export function setDynamicRestaurants(restaurants: Restaurant[] | null): void {
+  dynamicRestaurants = restaurants?.length ? restaurants : null;
+}
+
+export function hasDynamicRestaurants(): boolean {
+  return dynamicRestaurants !== null && dynamicRestaurants.length > 0;
+}
+
+function restaurantsSource(): Restaurant[] {
+  return dynamicRestaurants ?? RESTAURANTS;
+}
+
+/** Demo data — fallback when Places API is unavailable */
 export const RESTAURANTS: Restaurant[] = [
   {
     id: "r1",
@@ -127,7 +142,9 @@ export const RESTAURANTS: Restaurant[] = [
   },
 ];
 
-const ALL_ITEMS = RESTAURANTS.flatMap((r) => r.items);
+function allItemsFromSource(): FoodItem[] {
+  return restaurantsSource().flatMap((r) => r.items);
+}
 
 function normalize(s: string): string {
   return s.toLowerCase().trim();
@@ -176,7 +193,7 @@ export function filterItemsByPrompt(
   }
   if (p.includes("spicy")) include.push("spicy");
 
-  let items = [...ALL_ITEMS];
+  let items = [...allItemsFromSource()];
 
   if (exclude.length) {
     items = items.filter((item) => {
@@ -219,11 +236,11 @@ export function filterItemsByPrompt(
     );
   }
 
-  return items.length ? items : ALL_ITEMS;
+  return items.length ? items : allItemsFromSource();
 }
 
 export function getRestaurantById(id: string): Restaurant | undefined {
-  return RESTAURANTS.find((r) => r.id === id);
+  return restaurantsSource().find((r) => r.id === id);
 }
 
 export const LIKES_THRESHOLD_SUGGEST = 3;
@@ -247,7 +264,7 @@ export function getRestaurantItems(restaurantId: string): FoodItem[] {
 export async function getScrapedMenuForRestaurant(
   restaurantId: string,
 ): Promise<{ sourceUrl: string; items: FoodItem[] }> {
-  const restaurant = getRestaurantById(restaurantId);
+  const restaurant = restaurantsSource().find((r) => r.id === restaurantId);
   if (!restaurant) {
     return { sourceUrl: "", items: [] };
   }
