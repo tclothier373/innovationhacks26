@@ -366,11 +366,19 @@ export default function SwipingPage() {
             contextPrompt: s.contextPrompt,
           }),
         });
-        const json: {
-          data?: unknown;
-          error?: string;
-          hint?: string;
-        } = await res.json();
+        const rawText = await res.text();
+        let json: { data?: unknown; error?: string; hint?: string } = {};
+        try {
+          json = rawText ? (JSON.parse(rawText) as typeof json) : {};
+        } catch {
+          if (!cancelled) {
+            setPlacesDiag({
+              error: `/api/restaurants returned invalid JSON (HTTP ${res.status}).`,
+              hint: rawText.slice(0, 160).replace(/\s+/g, " "),
+            });
+            json = { data: [] };
+          }
+        }
         if (cancelled) return;
 
         const rows = json.data;
@@ -440,11 +448,17 @@ export default function SwipingPage() {
           contextPrompt: next.contextPrompt,
         }),
       });
-      const json: {
-        data?: unknown;
-        error?: string;
-        hint?: string;
-      } = await res.json();
+      const rawText = await res.text();
+      let json: { data?: unknown; error?: string; hint?: string } = {};
+      try {
+        json = rawText ? (JSON.parse(rawText) as typeof json) : {};
+      } catch {
+        setPlacesDiag({
+          error: `/api/restaurants returned invalid JSON (HTTP ${res.status}).`,
+          hint: rawText.slice(0, 160).replace(/\s+/g, " "),
+        });
+        json = { data: [] };
+      }
       const rows = json.data;
       if (Array.isArray(rows) && rows.length > 0) {
         setDynamicRestaurants(

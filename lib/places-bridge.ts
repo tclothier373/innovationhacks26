@@ -61,7 +61,11 @@ export function buildPlacesSearchQuery(
 
 export function mapPlacesApiToRestaurants(rows: PlacesApiRestaurantRow[]): Restaurant[] {
   return rows.map((row, index) => {
-    const id = row.place_id?.trim() || slugId(row.name, index);
+    const name =
+      typeof row.name === "string" && row.name.trim()
+        ? row.name.trim()
+        : `Restaurant ${index + 1}`;
+    const id = row.place_id?.trim() || slugId(name, index);
     const cuisine = (row.cuisine || "Restaurant").trim();
     const mainFood = (row.main_food || "House favorite").trim();
     const tags = tagBlob(cuisine, mainFood);
@@ -71,7 +75,7 @@ export function mapPlacesApiToRestaurants(rows: PlacesApiRestaurantRow[]): Resta
         id: `${id}::main`,
         restaurantId: id,
         name: mainFood,
-        description: `Popular pick at ${row.name} — ${cuisine} flavors.`,
+        description: `Popular pick at ${name} — ${cuisine} flavors.`,
         tags,
       },
       {
@@ -95,7 +99,7 @@ export function mapPlacesApiToRestaurants(rows: PlacesApiRestaurantRow[]): Resta
 
     return {
       id,
-      name: row.name,
+      name,
       stars: typeof row.rating === "number" ? row.rating : 4.2,
       reviewCount:
         typeof row.user_ratings_total === "number"

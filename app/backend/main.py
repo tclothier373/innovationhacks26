@@ -43,6 +43,7 @@ _load_root_env()
 # This is NOT the same as a Gemini / AI Studio-only key (AIza... for generative language).
 PLACES_API_KEY = (
     os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+    or os.getenv("GOOGLES_MAPS_API_KEY", "").strip()  # common typo
     or os.getenv("MAPS_API_KEY", "").strip()
     or os.getenv("GEMINI_API_KEY", "").strip()
 )
@@ -109,6 +110,18 @@ def _enrich_prompt(place: dict) -> str:
     """
 
 
+def _parse_json_from_model(text: str) -> dict:
+    raw = (text or "").strip()
+    if not raw:
+        raise ValueError("empty model response")
+    if raw.startswith("```"):
+        nl = raw.find("\n")
+        raw = raw[nl + 1 :] if nl >= 0 else raw[3:]
+        if "```" in raw:
+            raw = raw.split("```", 1)[0].strip()
+    return json.loads(raw)
+
+
 def enrich_restaurant(place: dict) -> dict:
     prompt = _enrich_prompt(place)
     if _genai_model is not None:
@@ -117,7 +130,7 @@ def enrich_restaurant(place: dict) -> dict:
                 prompt,
                 generation_config={"response_mime_type": "application/json"},
             )
-            return json.loads(r.text)
+            return _parse_json_from_model(getattr(r, "text", "") or "")
         except Exception:
             pass
     if _vertex_model is not None:
@@ -126,7 +139,7 @@ def enrich_restaurant(place: dict) -> dict:
                 prompt,
                 generation_config={"response_mime_type": "application/json"},
             )
-            return json.loads(response.text)
+            return _parse_json_from_model(getattr(response, "text", "") or "")
         except Exception:
             pass
     return fallback_enrich(place)
