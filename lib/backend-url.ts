@@ -1,6 +1,6 @@
 /** FastAPI origin only (no /restaurants path). */
 
-const DEFAULT = "https://nonvertebral-winter-pronunciative.ngrok-free.dev";
+const DEFAULT = "http://127.0.0.1:8000";
 
 export function getBackendOrigin(): string {
   let raw = (process.env.RESTAURANTS_API_URL ?? DEFAULT).trim();

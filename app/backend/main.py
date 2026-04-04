@@ -176,6 +176,11 @@ def get_restaurants_nearby(
     return data.get("results", []) or [], status, None
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/restaurants")
 def get_restaurant_data(
     query: str = "restaurants",
