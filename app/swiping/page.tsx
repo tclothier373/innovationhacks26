@@ -18,10 +18,12 @@ import {
 } from "framer-motion";
 import { GrubrHeader } from "@/components/grubr-header";
 import {
+  clearCart,
   getProfile,
   getSwipeState,
   resetAllGrubrData,
   saveSwipeState,
+  setTargetRestaurantId,
   type GrubrSwipeState,
 } from "@/lib/grubr-storage";
 import {
@@ -439,11 +441,11 @@ export default function SwipingPage() {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       className="rounded-xl bg-grubr-orange py-2 text-xs font-bold text-white shadow-md hover:bg-grubr-orange-dark"
-                      onClick={() =>
-                        alert(
-                          `${r.name} — order flow would open here in the full product.`,
-                        )
-                      }
+                      onClick={() => {
+                        clearCart();
+                        setTargetRestaurantId(r.id);
+                        router.push(`/restaurant-confirm?restaurantId=${r.id}`);
+                      }}
                     >
                       Continue to restaurant
                     </motion.button>

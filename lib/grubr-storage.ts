@@ -20,6 +20,14 @@ export type GrubrSwipeState = {
   contextPrompt: string;
 };
 
+export type GrubrCartItem = {
+  id: string;
+  restaurantId: string;
+  name: string;
+  priceCents: number;
+  quantity: number;
+};
+
 const defaultSwipe: GrubrSwipeState = {
   restaurantLikes: {},
   seenItemIds: [],
@@ -66,6 +74,81 @@ export function getSwipeState(): GrubrSwipeState {
 
 export function saveSwipeState(state: GrubrSwipeState): void {
   window.localStorage.setItem(`${PREFIX}swipe`, JSON.stringify(state));
+}
+
+export function getCartItems(): GrubrCartItem[] {
+  if (typeof window === "undefined") return [];
+  const raw = window.localStorage.getItem(`${PREFIX}cart`);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as GrubrCartItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCartItems(items: GrubrCartItem[]): void {
+  window.localStorage.setItem(`${PREFIX}cart`, JSON.stringify(items));
+}
+
+export function addItemToCart(nextItem: Omit<GrubrCartItem, "quantity">): void {
+  const existing = getCartItems();
+  const idx = existing.findIndex((i) => i.id === nextItem.id);
+  if (idx >= 0) {
+    existing[idx] = {
+      ...existing[idx],
+      quantity: existing[idx].quantity + 1,
+    };
+  } else {
+    existing.push({ ...nextItem, quantity: 1 });
+  }
+  saveCartItems(existing);
+}
+
+export function removeItemFromCart(itemId: string): void {
+  const existing = getCartItems();
+  const target = existing.find((i) => i.id === itemId);
+  if (!target) return;
+  if (target.quantity > 1) {
+    saveCartItems(
+      existing.map((i) =>
+        i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i,
+      ),
+    );
+  } else {
+    saveCartItems(existing.filter((i) => i.id !== itemId));
+  }
+}
+
+export function clearCart(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(`${PREFIX}cart`);
+}
+
+export function setTargetRestaurantId(restaurantId: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(`${PREFIX}target_restaurant`, restaurantId);
+}
+
+export function getTargetRestaurantId(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(`${PREFIX}target_restaurant`);
+}
+
+export function clearTargetRestaurantId(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(`${PREFIX}target_restaurant`);
+}
+
+export function saveCheckoutAddress(address: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(`${PREFIX}address`, address.trim());
+}
+
+export function getCheckoutAddress(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(`${PREFIX}address`) ?? "";
 }
 
 export function resetAllGrubrData(): void {

@@ -227,3 +227,59 @@ export function getRestaurantById(id: string): Restaurant | undefined {
 }
 
 export const LIKES_THRESHOLD_SUGGEST = 3;
+
+function seededInt(seed: string, min: number, max: number): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i += 1) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  const n = Math.abs(h);
+  return min + (n % (max - min + 1));
+}
+
+export function getItemPriceCents(item: FoodItem): number {
+  return seededInt(item.id + item.name, 899, 2699);
+}
+
+export function getRestaurantItems(restaurantId: string): FoodItem[] {
+  const restaurant = getRestaurantById(restaurantId);
+  return restaurant ? restaurant.items : [];
+}
+
+export async function getScrapedMenuForRestaurant(
+  restaurantId: string,
+): Promise<{ sourceUrl: string; items: FoodItem[] }> {
+  const restaurant = getRestaurantById(restaurantId);
+  if (!restaurant) {
+    return { sourceUrl: "", items: [] };
+  }
+
+  const sourceUrl = `https://www.grubhub.com/restaurant/${restaurant.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")}`;
+
+  const generated: FoodItem[] = [
+    {
+      id: `${restaurantId}-x1`,
+      restaurantId,
+      name: `${restaurant.cuisine} House Special`,
+      description: "Chef's rotating special imported from menu listing.",
+      tags: [restaurant.cuisine.toLowerCase(), "special"],
+    },
+    {
+      id: `${restaurantId}-x2`,
+      restaurantId,
+      name: `${restaurant.cuisine} Family Combo`,
+      description: "Multi-item combo with sides and drink.",
+      tags: [restaurant.cuisine.toLowerCase(), "combo"],
+    },
+  ];
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, 1200);
+  });
+
+  return {
+    sourceUrl,
+    items: [...restaurant.items, ...generated],
+  };
+}
