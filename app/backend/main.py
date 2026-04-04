@@ -609,46 +609,140 @@ def _full_menu_to_proposed_items(
     return out
 
 
-def _scrape_grubhub_menu_blocking(url: str, include_modals: bool) -> dict[str, list[dict[str, Any]]]:
-    """Headless Chrome + BeautifulSoup — prototype / demo only."""
+_GRUBHUB_API_HEADERS = {
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://www.grubhub.com/",
+    "Origin": "https://www.grubhub.com",
+}
+
+
+def _grubhub_search_restaurant_id(
+    name: str,
+    address: Optional[str],
+    lat: Optional[float],
+    lng: Optional[float],
+) -> Optional[int]:
+    """Search Grubhub's API for a restaurant by name + location; return numeric restaurant ID."""
+    params: dict[str, Any] = {
+        "orderMethod": "standard",
+        "locationMode": "DELIVERY",
+        "facetSet": "umamiV2",
+        "pageSize": "5",
+        "hideClosedRestaurantsMode": "semi",
+        "queryText": name,
+    }
+    if lat is not None and lng is not None:
+        params["latitude"] = str(lat)
+        params["longitude"] = str(lng)
+    elif address:
+        params["location"] = address
+
+    try:
+        res = requests.get(
+            "https://api-gtm.grubhub.com/restaurants/search",
+            params=params,
+            headers=_GRUBHUB_API_HEADERS,
+            timeout=15,
+        )
+        if not res.ok:
+            return None
+        data = res.json()
+    except Exception:
+        return None
+
+    results = (
+        (data.get("search_result") or {}).get("results") or []
+    )
+    # Pick the result whose name most closely matches
+    name_lower = name.lower()
+    best_id: Optional[int] = None
+    best_score = -1
+    for r in results:
+        rest = r.get("restaurant") if isinstance(r, dict) else None
+        if not isinstance(rest, dict):
+            continue
+        rid = rest.get("id")
+        rname = str(rest.get("name") or "").lower()
+        # Simple overlap score
+        score = sum(1 for word in name_lower.split() if word in rname)
+        if score > best_score:
+            best_score = score
+            best_id = rid
+    return best_id if best_id is not None else None
+
+
+def _grubhub_fetch_menu_by_id(
+    restaurant_id: int,
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch full menu from Grubhub's restaurant detail API by restaurant ID."""
+    try:
+        res = requests.get(
+            f"https://api-gtm.grubhub.com/restaurants/{restaurant_id}",
+            params={"orderMethod": "standard", "locationMode": "DELIVERY"},
+            headers=_GRUBHUB_API_HEADERS,
+            timeout=15,
+        )
+        if not res.ok:
+            return {}
+        data = res.json()
+    except Exception:
+        return {}
+
+    restaurant = data.get("restaurant")
+    if not isinstance(restaurant, dict):
+        return {}
+
+    categories = restaurant.get("menu_category_list") or []
+    full_menu: dict[str, list[dict[str, Any]]] = {}
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = str(cat.get("name") or "Menu").strip() or "Menu"
+        items = cat.get("menu_item_list") or []
+        parsed_items: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = str(item.get("name") or "").strip()
+            if not item_name:
+                continue
+            raw_price = item.get("price")
+            price_str = ""
+            if isinstance(raw_price, (int, float)) and raw_price > 0:
+                price_str = f"${raw_price / 100:.2f}"
+            desc = str(item.get("description") or "").strip()
+            parsed_items.append(
+                {"name": item_name, "price": price_str, "description": desc, "options": {}}
+            )
+        if parsed_items:
+            full_menu[cat_name] = parsed_items
+    return full_menu
+
+
+def _fetch_grubhub_menu_for_restaurant(
+    name: str,
+    address: Optional[str],
+    lat: Optional[float],
+    lng: Optional[float],
+) -> dict[str, list[dict[str, Any]]]:
+    """Search Grubhub for a restaurant by name+location, then return its full menu."""
+    rid = _grubhub_search_restaurant_id(name, address, lat, lng)
+    if rid is None:
+        return {}
+    return _grubhub_fetch_menu_by_id(rid)
+
+
+def _scrape_grubhub_menu_by_url(url: str) -> dict[str, list[dict[str, Any]]]:
+    """Fallback: headless Chrome scrape when we have a known Grubhub menu URL."""
     from bs4 import BeautifulSoup
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-
-    def modal_options(browser: Any, el_id: Optional[str]) -> dict[str, Any]:
-        if not el_id:
-            return {}
-        try:
-            button = browser.find_element(By.ID, el_id)
-            browser.execute_script("arguments[0].click();", button)
-            time.sleep(1.2)
-            soup = BeautifulSoup(browser.page_source, "html.parser")
-            parsed: dict[str, Any] = {}
-            for option in soup.find_all("div", class_="menuItemModal-options"):
-                name_el = option.find(class_="menuItemModal-choice-name")
-                grp = name_el.get_text(strip=True) if name_el else ""
-                choices = option.find_all(
-                    "span", class_="menuItemModal-choice-option-description"
-                )
-                if not choices:
-                    continue
-                texts = [c.get_text(strip=True) for c in choices]
-                first = texts[0] if texts else ""
-                key = grp or "options"
-                if " + " in first:
-                    sub: dict[str, str] = {}
-                    for c in choices:
-                        t = c.get_text(strip=True)
-                        if " + " in t:
-                            a, b = t.split(" + ", 1)
-                            sub[a.strip()] = b.strip()
-                    parsed[key] = sub
-                else:
-                    parsed[key] = texts
-            return parsed
-        except Exception:
-            return {}
 
     opts = Options()
     opts.add_argument("--headless=new")
@@ -683,19 +777,10 @@ def _scrape_grubhub_menu_blocking(url: str, include_modals: bool) -> dict[str, l
                 p.get_text(strip=True)
                 for p in cat.find_all("span", class_="menuItem-displayPrice")
             ]
-            inner_divs = cat.find_all("div", class_="menuItem-inner")
-            row_ids = [d.get("id") for d in inner_divs]
-
             all_items: list[dict[str, Any]] = []
             for j, itm_name in enumerate(names):
                 price = prices_list[j] if j < len(prices_list) else ""
-                el_id = row_ids[j] if j < len(row_ids) else None
-                item_opts: dict[str, Any] = {}
-                if include_modals:
-                    item_opts = modal_options(browser, el_id)
-                all_items.append(
-                    {"name": itm_name, "price": price, "options": item_opts}
-                )
+                all_items.append({"name": itm_name, "price": price, "options": {}})
             if all_items:
                 full_menu[title] = all_items
         return full_menu
@@ -727,23 +812,43 @@ async def menu_proposals(request: Request):
         "yes",
     )
     if scraper_on:
-        urls = _resolve_scrape_urls_with_gemini(restaurants, n, payload, slim)
-        include_modals = os.getenv("GRUBHUB_SCRAPE_MODALS", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        # Resolve any manually-specified or env-var Grubhub URLs (used as fallback only)
+        fallback_urls = _resolve_grubhub_urls(restaurants, n, payload)
+
         for i in range(n):
-            u = urls[i]
-            if not u:
-                continue
+            s = slim[i] if i < len(slim) else {}
+            r = restaurants[i] if i < len(restaurants) and isinstance(restaurants[i], dict) else {}
+            name = s.get("name") or r.get("name") or ""
+            address = s.get("vicinity") or s.get("formatted_address") or r.get("vicinity") or r.get("formatted_address") or ""
+            lat = r.get("lat") or r.get("latitude")
+            lng = r.get("lng") or r.get("longitude")
             try:
-                fm = await run_in_threadpool(_scrape_grubhub_menu_blocking, u, include_modals)
+                lat = float(lat) if lat is not None else None
+                lng = float(lng) if lng is not None else None
+            except (TypeError, ValueError):
+                lat = lng = None
+
+            fm: dict[str, list[dict[str, Any]]] = {}
+            # Primary: API-based search + fetch (no Selenium needed)
+            if name:
+                try:
+                    fm = await run_in_threadpool(
+                        _fetch_grubhub_menu_for_restaurant, name, address or None, lat, lng
+                    )
+                except Exception:
+                    fm = {}
+
+            # Fallback: Selenium scrape if we have a known URL and API returned nothing
+            if not fm and fallback_urls[i]:
+                try:
+                    fm = await run_in_threadpool(_scrape_grubhub_menu_by_url, fallback_urls[i])
+                except Exception:
+                    fm = {}
+
+            if fm:
                 items = _full_menu_to_proposed_items(fm, max_items=5)
                 if len(items) >= 3:
                     scraped_by_index[i] = items
-            except Exception:
-                pass
 
     parsed = _llm_menu_json(slim)
     menus_raw = parsed.get("menus") if isinstance(parsed, dict) else None
