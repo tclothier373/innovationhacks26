@@ -105,12 +105,12 @@ export default function CheckoutPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.06, ...SPRING }}
-          className="overflow-hidden rounded-3xl bg-white shadow-2xl shadow-black/16"
+          className="overflow-hidden rounded-3xl bg-white text-gray-900 shadow-2xl shadow-black/16"
         >
 
           {/* Section: Delivery mode */}
-          <div className="border-b border-b1 px-5 py-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-i2">
+          <div className="border-b border-stone-100 px-5 py-4">
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-gray-500">
               Fulfillment
             </p>
             <div className="flex gap-2">
@@ -121,8 +121,8 @@ export default function CheckoutPage() {
                   onClick={() => setMode(m)}
                   className={`flex-1 rounded-xl py-2.5 text-sm font-bold transition-all ${
                     mode === m
-                      ? "bg-brand text-white shadow-md shadow-brand/25"
-                      : "border-2 border-b2 bg-s1 text-i1 hover:bg-s2"
+                      ? "bg-[#FF5500] text-white shadow-md shadow-[#FF5500]/25"
+                      : "border-2 border-stone-200 bg-stone-50 text-gray-800 hover:bg-stone-100"
                   }`}
                 >
                   {m === "delivery" ? "🚗 Delivery" : "🏠 Pickup"}
@@ -132,38 +132,38 @@ export default function CheckoutPage() {
           </div>
 
           {/* Section: Address & time */}
-          <div className="border-b border-b1 px-5 py-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-i2">
+          <div className="border-b border-stone-100 px-5 py-4">
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-gray-500">
               Details
             </p>
             <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-sm font-semibold text-i0">
+                <label className="mb-1 block text-sm font-semibold text-gray-800">
                   {mode === "delivery" ? "Delivery address" : "Pickup address"}
                 </label>
-                <div className="flex items-center gap-2 rounded-xl border border-b1 bg-s1 px-3 py-2.5 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/15">
-                  <span className="text-brand">📍</span>
+                <div className="flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 focus-within:border-[#FF5500] focus-within:ring-2 focus-within:ring-[#FF5500]/15">
+                  <span className="text-[#FF5500]">📍</span>
                   <input
                     type="text"
                     value={currentAddress}
                     onChange={(e) => setAddress(e.target.value)}
                     placeholder="Enter your address"
-                    className="flex-1 bg-transparent text-sm text-i0 placeholder:text-i3 outline-none"
+                    className="flex-1 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 outline-none"
                   />
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-sm font-semibold text-i0">
+                <label className="mb-1 block text-sm font-semibold text-gray-800">
                   {mode === "delivery" ? "Delivery time" : "Pickup time"}
                 </label>
-                <div className="flex items-center gap-2 rounded-xl border border-b1 bg-s1 px-3 py-2.5 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/15">
-                  <span className="text-brand">🕐</span>
+                <div className="flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 focus-within:border-[#FF5500] focus-within:ring-2 focus-within:ring-[#FF5500]/15">
+                  <span className="text-[#FF5500]">🕐</span>
                   <input
                     type="text"
                     value={readyTime}
                     onChange={(e) => setReadyTime(e.target.value)}
                     placeholder="e.g. 7:30 PM"
-                    className="flex-1 bg-transparent text-sm text-i0 placeholder:text-i3 outline-none"
+                    className="flex-1 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 outline-none"
                   />
                 </div>
               </div>
@@ -171,27 +171,27 @@ export default function CheckoutPage() {
           </div>
 
           {/* Section: Cart items */}
-          <div className="border-b border-b1 px-5 py-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-i2">
+          <div className="border-b border-stone-100 px-5 py-4">
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-gray-500">
               Your Order
             </p>
             {cart.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-b2 bg-s1 px-4 py-5 text-center">
-                <p className="text-sm text-i3">Cart is empty</p>
+              <div className="rounded-xl border border-dashed border-stone-200 bg-stone-50 px-4 py-5 text-center">
+                <p className="text-sm text-gray-400">Cart is empty</p>
               </div>
             ) : (
               <div className="space-y-2">
                 {cart.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-b1 bg-s1 p-3"
+                    className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-i0">{item.name}</p>
-                      <p className="text-xs text-i3">Qty {item.quantity}</p>
+                      <p className="truncate text-sm font-semibold text-gray-900">{item.name}</p>
+                      <p className="text-xs text-gray-400">Qty {item.quantity}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-brand">
+                      <span className="text-sm font-bold text-[#FF5500]">
                         {formatCurrency(item.priceCents * item.quantity)}
                       </span>
                       <button
@@ -200,7 +200,7 @@ export default function CheckoutPage() {
                           removeItemFromCart(item.id);
                           setCartRefreshKey((k) => k + 1);
                         }}
-                        className="rounded-lg border border-b2 bg-white px-2 py-1 text-[11px] font-semibold text-i2 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-500"
+                        className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-500"
                       >
                         ✕
                       </button>
@@ -212,43 +212,43 @@ export default function CheckoutPage() {
           </div>
 
           {/* Section: Pricing */}
-          <div className="border-b border-b1 px-5 py-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-i2">
+          <div className="border-b border-stone-100 px-5 py-4">
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-gray-500">
               Pricing
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-i2">Subtotal</span>
-                <span className="font-semibold text-i0">{formatCurrency(subtotal)}</span>
+                <span className="text-gray-600">Subtotal</span>
+                <span className="font-semibold text-gray-900">{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-i2">Platform fee (5%)</span>
-                <span className="font-semibold text-i0">{formatCurrency(platformCut)}</span>
+                <span className="text-gray-600">Platform fee (5%)</span>
+                <span className="font-semibold text-gray-900">{formatCurrency(platformCut)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-i2">Tax (8.875%)</span>
-                <span className="font-semibold text-i0">{formatCurrency(tax)}</span>
+                <span className="text-gray-600">Tax (8.875%)</span>
+                <span className="font-semibold text-gray-900">{formatCurrency(tax)}</span>
               </div>
-              <div className="flex justify-between border-t border-b1 pt-2.5 mt-2">
-                <span className="text-base font-bold text-i0">Total</span>
-                <span className="text-base font-extrabold text-brand">{formatCurrency(totalAfterTax)}</span>
+              <div className="flex justify-between border-t border-stone-100 pt-2.5 mt-2">
+                <span className="text-base font-bold text-gray-900">Total</span>
+                <span className="text-base font-extrabold text-[#FF5500]">{formatCurrency(totalAfterTax)}</span>
               </div>
             </div>
           </div>
 
           {/* Section: Payment */}
-          <div className="border-b border-b1 px-5 py-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-i2">
+          <div className="border-b border-stone-100 px-5 py-4">
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-gray-500">
               Payment
             </p>
-            <div className="rounded-xl border border-b1 bg-s1 p-4">
+            <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#635BFF]">
                   <span className="text-lg">💳</span>
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-i0">Stripe Checkout</p>
-                  <p className="text-xs text-i3">Secure payment powered by Stripe</p>
+                  <p className="text-sm font-bold text-gray-900">Stripe Checkout</p>
+                  <p className="text-xs text-gray-400">Secure payment powered by Stripe</p>
                 </div>
               </div>
               <motion.button
@@ -277,8 +277,8 @@ export default function CheckoutPage() {
               whileTap={canConfirm ? { scale: 0.97 } : undefined}
               className={`w-full rounded-xl py-4 text-base font-extrabold transition-all ${
                 canConfirm
-                  ? "bg-brand text-white shadow-lg shadow-brand/30 hover:bg-brand-dk"
-                  : "bg-s3 text-i3 cursor-not-allowed"
+                  ? "bg-[#FF5500] text-white shadow-lg shadow-[#FF5500]/30 hover:bg-[#CC3D00]"
+                  : "bg-stone-200 text-gray-400 cursor-not-allowed"
               }`}
             >
               {!currentAddress.trim()
@@ -291,7 +291,7 @@ export default function CheckoutPage() {
             </motion.button>
 
             {!canConfirm && (
-              <p className="mt-2 text-center text-xs text-i3">
+              <p className="mt-2 text-center text-xs text-gray-400">
                 {!currentAddress.trim()
                   ? "Please fill in your address above"
                   : cart.length === 0
@@ -303,7 +303,7 @@ export default function CheckoutPage() {
             <button
               type="button"
               onClick={() => router.back()}
-              className="mt-3 w-full rounded-xl border border-b1 bg-s1 py-2.5 text-sm font-semibold text-i2 transition-colors hover:bg-s2"
+              className="mt-3 w-full rounded-xl border border-stone-200 bg-stone-50 py-2.5 text-sm font-semibold text-gray-600 transition-colors hover:bg-stone-100"
             >
               ← Back
             </button>

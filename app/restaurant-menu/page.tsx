@@ -84,7 +84,7 @@ export default function RestaurantMenuPage() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={SPRING}
-            className="mb-4 overflow-hidden rounded-2xl bg-white shadow-xl shadow-black/10"
+            className="mb-4 overflow-hidden rounded-2xl bg-white text-gray-900 shadow-xl shadow-black/10"
           >
             <div className={`relative h-20 overflow-hidden bg-gradient-to-br ${visual.gradient}`}>
               <div className={`absolute -top-6 -right-6 h-28 w-28 rounded-full blur-3xl ${visual.orbA} animate-orb-a`} />
@@ -96,23 +96,23 @@ export default function RestaurantMenuPage() {
                   </span>
                   <div>
                     <p
-                      className="text-xl font-extrabold text-i0"
+                      className="text-xl font-extrabold text-gray-900"
                       style={{ fontFamily: "var(--font-syne)" }}
                     >
                       {restaurant.name}
                     </p>
-                    <p className="text-xs text-i2">{restaurant.stars} ★ · {restaurant.reviewCount} reviews · {restaurant.cuisine}</p>
+                    <p className="text-xs text-gray-600">{restaurant.stars} ★ · {restaurant.reviewCount} reviews · {restaurant.cuisine}</p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 border-t border-b1 bg-s1 px-5 py-2.5">
-              <div className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" />
-              <p className="text-xs text-i2">
+            <div className="flex items-center gap-2 border-t border-stone-100 bg-stone-50 px-5 py-2.5">
+              <div className="h-1.5 w-1.5 rounded-full bg-[#FF5500] animate-pulse" />
+              <p className="text-xs text-gray-600">
                 Menu imported from Grubhub
                 {sourceUrl && (
-                  <span className="ml-1 text-i3">· {sourceUrl.replace("https://", "")}</span>
+                  <span className="ml-1 text-gray-400">· {sourceUrl.replace("https://", "")}</span>
                 )}
               </p>
             </div>
@@ -133,7 +133,7 @@ export default function RestaurantMenuPage() {
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.06, ...SPRING }}
-                  className="group overflow-hidden rounded-2xl bg-white shadow-md shadow-black/8 transition-shadow hover:shadow-lg"
+                  className="group overflow-hidden rounded-2xl bg-white text-gray-900 shadow-md shadow-black/8 transition-shadow hover:shadow-lg"
                 >
                   {/* Mini gradient header */}
                   <div className={`h-10 bg-gradient-to-r ${visual.gradient} relative overflow-hidden`}>
@@ -141,8 +141,8 @@ export default function RestaurantMenuPage() {
                   </div>
 
                   <div className="px-4 py-3">
-                    <p className="text-sm font-bold text-i0 leading-snug">{item.name}</p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-i2 line-clamp-2">{item.description}</p>
+                    <p className="text-sm font-bold text-gray-900 leading-snug">{item.name}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-gray-500 line-clamp-2">{item.description}</p>
 
                     <div className="mt-3 flex items-center justify-between gap-2">
                       <span className="text-sm font-extrabold text-brand">

@@ -49,7 +49,7 @@ function ItemCard({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.90, y: -20 }}
       transition={SPRING}
-      className="w-full max-w-sm overflow-hidden rounded-3xl bg-white shadow-2xl shadow-black/18"
+      className="w-full max-w-sm overflow-hidden rounded-3xl bg-white text-gray-900 shadow-2xl shadow-black/18"
     >
       {/* Image area */}
       <div className={`relative h-44 overflow-hidden bg-gradient-to-br ${visual.gradient}`}>
@@ -62,7 +62,7 @@ function ItemCard({
           {visual.emoji}
         </div>
         <div className="absolute bottom-3 left-3 flex items-center gap-2">
-          <span className="rounded-full border border-white/50 bg-white/70 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-i1 backdrop-blur-sm">
+          <span className="rounded-full border border-white/50 bg-white/70 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-800 backdrop-blur-sm">
             {restaurant.cuisine}
           </span>
         </div>
@@ -70,19 +70,19 @@ function ItemCard({
 
       {/* Body */}
       <div className="px-5 py-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-brand">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#FF5500]">
           {restaurant.name}
         </p>
         <h2
-          className="mt-1.5 text-xl font-extrabold leading-snug text-i0"
+          className="mt-1.5 text-xl font-extrabold leading-snug text-gray-900"
           style={{ fontFamily: "var(--font-syne)" }}
         >
           {item.name}
         </h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-i2">{item.description}</p>
+        <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{item.description}</p>
 
         <div className="mt-4 flex items-center justify-between">
-          <span className="text-lg font-extrabold text-brand">{formatPrice(price)}</span>
+          <span className="text-lg font-extrabold text-[#FF5500]">{formatPrice(price)}</span>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3">
@@ -91,7 +91,7 @@ function ItemCard({
             onClick={onPass}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.96 }}
-            className="rounded-xl border-2 border-b2 bg-s1 py-3 text-sm font-bold text-i1 transition-all hover:bg-s2"
+            className="rounded-xl border-2 border-stone-200 bg-stone-50 py-3 text-sm font-bold text-gray-700 transition-all hover:bg-stone-100"
           >
             Pass ✕
           </motion.button>
@@ -186,16 +186,16 @@ export default function RestaurantSwipePage() {
                 initial={{ opacity: 0, scale: 0.94 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={SPRING}
-                className="w-full max-w-sm overflow-hidden rounded-3xl bg-white p-8 text-center shadow-2xl shadow-black/18"
+                className="w-full max-w-sm overflow-hidden rounded-3xl bg-white p-8 text-center text-gray-900 shadow-2xl shadow-black/18"
               >
                 <span className="text-5xl">🛒</span>
                 <h2
-                  className="mt-3 text-xl font-extrabold text-i0"
+                  className="mt-3 text-xl font-extrabold text-gray-900"
                   style={{ fontFamily: "var(--font-syne)" }}
                 >
                   That&apos;s the menu!
                 </h2>
-                <p className="mt-2 text-sm text-i2">
+                <p className="mt-2 text-sm text-gray-600">
                   You&apos;ve gone through all dishes from {restaurant.name}.
                   {cart.length > 0 ? " Ready to checkout?" : " Head back to add more."}
                 </p>
@@ -212,7 +212,7 @@ export default function RestaurantSwipePage() {
                   <button
                     type="button"
                     onClick={() => router.push("/swiping")}
-                    className="w-full rounded-xl border-2 border-b2 bg-s1 py-3 text-sm font-semibold text-i1 hover:bg-s2"
+                    className="w-full rounded-xl border-2 border-stone-200 bg-stone-50 py-3 text-sm font-semibold text-gray-700 hover:bg-stone-100"
                   >
                     Back to discovery
                   </button>

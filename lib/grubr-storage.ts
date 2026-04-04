@@ -151,31 +151,26 @@ export function getCheckoutAddress(): string {
   return window.localStorage.getItem(`${PREFIX}address`) ?? "";
 }
 
-export function getDismissedSuggestionIds(): string[] {
-  if (typeof window === "undefined") return [];
-  const raw = window.localStorage.getItem(`${PREFIX}dismissed_suggestions`);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as string[]) : [];
-  } catch {
-    return [];
-  }
+/**
+ * Per-restaurant like count at which the last suggestion was cleared (No / timeout / Continue).
+ * Next toast shows when likes increase by another full threshold from that baseline.
+ */
+const _suggestionDismissLikeCheckpoint = new Map<string, number>();
+
+export function getSuggestionDismissLikeCheckpoints(): Record<string, number> {
+  return Object.fromEntries(_suggestionDismissLikeCheckpoint);
 }
 
-export function addDismissedSuggestionId(restaurantId: string): void {
-  if (typeof window === "undefined") return;
-  const existing = getDismissedSuggestionIds();
-  if (!existing.includes(restaurantId)) {
-    window.localStorage.setItem(
-      `${PREFIX}dismissed_suggestions`,
-      JSON.stringify([...existing, restaurantId]),
-    );
-  }
+export function setSuggestionDismissLikeCheckpoint(
+  restaurantId: string,
+  likeCount: number,
+): void {
+  _suggestionDismissLikeCheckpoint.set(restaurantId, likeCount);
 }
 
 export function resetAllGrubrData(): void {
   if (typeof window === "undefined") return;
+  _suggestionDismissLikeCheckpoint.clear();
   const keys = Object.keys(window.localStorage);
   for (const k of keys) {
     if (k.startsWith(PREFIX)) window.localStorage.removeItem(k);

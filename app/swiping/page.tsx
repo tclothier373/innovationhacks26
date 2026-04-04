@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   AnimatePresence,
@@ -19,9 +20,9 @@ import {
 } from "framer-motion";
 import { GrubrHeader } from "@/components/grubr-header";
 import {
-  addDismissedSuggestionId,
   clearCart,
-  getDismissedSuggestionIds,
+  getSuggestionDismissLikeCheckpoints,
+  setSuggestionDismissLikeCheckpoint,
   getProfile,
   getSwipeState,
   resetAllGrubrData,
@@ -54,7 +55,7 @@ const SUGGESTION_MS = 10_000;
 function StarRow({ value }: { value: number }) {
   const full = Math.min(5, Math.max(0, Math.round(value)));
   return (
-    <div className="flex items-center gap-0.5 text-brand" aria-label={`${value} stars`}>
+    <div className="flex items-center gap-0.5 text-[#FF5500]" aria-label={`${value} stars`}>
       {Array.from({ length: 5 }, (_, i) => (
         <span key={i} className={`text-sm ${i < full ? "opacity-100" : "opacity-25"}`}>★</span>
       ))}
@@ -160,36 +161,36 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
 
             {/* Cuisine pill */}
             <div className="absolute bottom-4 left-4">
-              <span className="rounded-full border border-white/50 bg-white/75 px-3 py-1 text-xs font-bold uppercase tracking-wider text-i1 backdrop-blur-sm">
+              <span className="rounded-full border border-white/50 bg-white/75 px-3 py-1 text-xs font-bold uppercase tracking-wider text-gray-800 backdrop-blur-sm">
                 {restaurant.cuisine}
               </span>
             </div>
           </div>
 
           {/* Card body */}
-          <div className="px-6 py-5">
+          <div className="px-6 py-5 text-gray-900">
             {/* Restaurant row */}
             <div className="flex items-center justify-between gap-3 mb-3">
               <p
-                className="text-sm font-extrabold uppercase tracking-[0.14em] text-brand"
+                className="text-sm font-extrabold uppercase tracking-[0.14em] text-[#FF5500]"
                 style={{ fontFamily: "var(--font-syne)" }}
               >
                 {restaurant.name}
               </p>
               <div className="flex items-center gap-1.5">
                 <StarRow value={restaurant.stars} />
-                <span className="text-sm font-bold text-i1">{restaurant.stars.toFixed(1)}</span>
-                <span className="text-xs text-i3">({restaurant.reviewCount})</span>
+                <span className="text-sm font-bold text-gray-800">{restaurant.stars.toFixed(1)}</span>
+                <span className="text-xs text-gray-400">({restaurant.reviewCount})</span>
               </div>
             </div>
 
             <h3
-              className="text-2xl font-extrabold leading-snug tracking-tight text-i0"
+              className="text-2xl font-extrabold leading-snug tracking-tight text-gray-900"
               style={{ fontFamily: "var(--font-syne)" }}
             >
               {item.name}
             </h3>
-            <p className="mt-2 text-sm leading-relaxed text-i2">
+            <p className="mt-2 text-sm leading-relaxed text-gray-600">
               {item.description}
             </p>
           </div>
@@ -258,13 +259,13 @@ function SuggestionToast({ restaurant, likeCount, onContinue, onDismiss }: Sugge
       animate={{ x: 0, opacity: 1, rotate: 0 }}
       exit={reduceMotion ? { opacity: 0 } : { x: "115%", opacity: 0, rotate: -2 }}
       transition={reduceMotion ? { duration: 0.2 } : { type: "spring", stiffness: 440, damping: 36 }}
-      className="pointer-events-auto fixed right-4 top-18 z-[60] w-[min(100vw-2rem,20rem)] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/20 ring-1 ring-black/5 sm:top-20"
+      className="pointer-events-auto fixed right-4 top-20 z-[100] w-[min(100vw-2rem,20rem)] overflow-hidden rounded-2xl bg-white text-gray-900 shadow-2xl shadow-black/20 ring-1 ring-black/5 sm:top-24"
     >
       {/* Progress bar */}
-      <div className="h-1 w-full bg-s2">
+      <div className="h-1 w-full bg-orange-100">
         <motion.div
           key={`pb-${restaurant.id}`}
-          className="h-full bg-brand"
+          className="h-full bg-[#FF5500]"
           initial={{ scaleX: 1 }}
           animate={{ scaleX: 0 }}
           transition={{ duration: SUGGESTION_MS / 1000, ease: "linear" }}
@@ -280,14 +281,14 @@ function SuggestionToast({ restaurant, likeCount, onContinue, onDismiss }: Sugge
               Trending for you
             </p>
             <p
-              className="text-base font-extrabold leading-tight text-i0"
+              className="text-base font-extrabold leading-tight text-gray-900"
               style={{ fontFamily: "var(--font-syne)" }}
             >
               {restaurant.name}
             </p>
           </div>
         </div>
-        <p className="mt-1.5 mb-2.5 text-xs text-i2">
+        <p className="mt-1.5 mb-2.5 text-xs text-gray-600">
           You&apos;ve liked <strong className="text-brand font-bold">{likeCount} dishes</strong> from here — sounds like a match.
         </p>
       </div>
@@ -303,7 +304,7 @@ function SuggestionToast({ restaurant, likeCount, onContinue, onDismiss }: Sugge
         <button
           type="button"
           onClick={onDismiss}
-          className="w-full rounded-xl border border-b1 bg-s1 py-2 text-xs font-semibold text-i2 transition-colors hover:bg-s2"
+          className="w-full rounded-xl border border-stone-200 bg-stone-50 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-stone-100"
         >
           No, keep swiping
         </button>
@@ -319,9 +320,11 @@ export default function SwipingPage() {
   const [index, setIndex] = useState(0);
   const [swipeState, setSwipeState] = useState<GrubrSwipeState>(getSwipeState);
   const [promptDraft, setPromptDraft] = useState("");
-  // Persisted so dismissed toasts don't re-appear after navigation
-  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<string[]>(
-    () => (typeof window !== "undefined" ? getDismissedSuggestionIds() : []),
+  /** Like count per restaurant when user last cleared a suggestion (repeat every +threshold likes). */
+  const [suggestionDismissCheckpoints, setSuggestionDismissCheckpoints] = useState<
+    Record<string, number>
+  >(() =>
+    typeof window !== "undefined" ? getSuggestionDismissLikeCheckpoints() : {},
   );
   const suggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -339,6 +342,12 @@ export default function SwipingPage() {
       setQueue(unseen.length ? unseen : items);
     });
   }, [router, isClient]);
+
+  /** Keep React state aligned with session checkpoints (hydration / remount safety). */
+  useEffect(() => {
+    if (!isClient) return;
+    setSuggestionDismissCheckpoints(getSuggestionDismissLikeCheckpoints());
+  }, [isClient]);
 
   const persist = useCallback((next: GrubrSwipeState) => {
     setSwipeState(next);
@@ -366,9 +375,18 @@ export default function SwipingPage() {
   , [swipeState.restaurantLikes]);
 
   const pendingSuggestion = useMemo(() => {
-    const dismissed = new Set(dismissedSuggestionIds);
-    return suggestions.find((r) => !dismissed.has(r.id)) ?? null;
-  }, [suggestions, dismissedSuggestionIds]);
+    for (const r of suggestions) {
+      const likes = swipeState.restaurantLikes[r.id] ?? 0;
+      const baseline = suggestionDismissCheckpoints[r.id] ?? 0;
+      if (
+        likes >= LIKES_THRESHOLD_SUGGEST &&
+        likes - baseline >= LIKES_THRESHOLD_SUGGEST
+      ) {
+        return r;
+      }
+    }
+    return null;
+  }, [suggestions, swipeState.restaurantLikes, suggestionDismissCheckpoints]);
 
   const clearSuggestionTimer = useCallback(() => {
     if (suggestionTimerRef.current) {
@@ -377,26 +395,38 @@ export default function SwipingPage() {
     }
   }, []);
 
+  const recordSuggestionCleared = useCallback((restaurantId: string) => {
+    const likeCount = getSwipeState().restaurantLikes[restaurantId] ?? 0;
+    setSuggestionDismissLikeCheckpoint(restaurantId, likeCount);
+    setSuggestionDismissCheckpoints((prev) => ({
+      ...prev,
+      [restaurantId]: likeCount,
+    }));
+  }, []);
+
   const dismissPendingSuggestion = useCallback(() => {
     if (!pendingSuggestion) return;
     clearSuggestionTimer();
-    addDismissedSuggestionId(pendingSuggestion.id);
-    setDismissedSuggestionIds((prev) =>
-      prev.includes(pendingSuggestion.id) ? prev : [...prev, pendingSuggestion.id],
-    );
-  }, [pendingSuggestion, clearSuggestionTimer]);
+    recordSuggestionCleared(pendingSuggestion.id);
+  }, [pendingSuggestion, clearSuggestionTimer, recordSuggestionCleared]);
+
+  /** Restarts auto-dismiss when the same restaurant qualifies again (e.g. 3 → 6 likes). */
+  const pendingSuggestionToastKey = pendingSuggestion
+    ? `${pendingSuggestion.id}:${swipeState.restaurantLikes[pendingSuggestion.id] ?? 0}`
+    : null;
 
   useEffect(() => {
     clearSuggestionTimer();
     const id = pendingSuggestion?.id;
     if (!id) return;
     suggestionTimerRef.current = setTimeout(() => {
-      addDismissedSuggestionId(id);
-      setDismissedSuggestionIds((prev) => prev.includes(id) ? prev : [...prev, id]);
+      const likeCount = getSwipeState().restaurantLikes[id] ?? 0;
+      setSuggestionDismissLikeCheckpoint(id, likeCount);
+      setSuggestionDismissCheckpoints((prev) => ({ ...prev, [id]: likeCount }));
       suggestionTimerRef.current = null;
     }, SUGGESTION_MS);
     return clearSuggestionTimer;
-  }, [pendingSuggestion?.id, clearSuggestionTimer]);
+  }, [pendingSuggestionToastKey, clearSuggestionTimer]);
 
   const handleSwipeComplete = useCallback((rating: number) => {
     if (!current) return;
@@ -438,25 +468,33 @@ export default function SwipingPage() {
     );
   }
 
+  const toastLayer =
+    typeof document !== "undefined"
+      ? createPortal(
+          <AnimatePresence mode="wait">
+            {pendingSuggestion && (
+              <SuggestionToast
+                key={pendingSuggestionToastKey ?? pendingSuggestion.id}
+                restaurant={pendingSuggestion}
+                likeCount={swipeState.restaurantLikes[pendingSuggestion.id] ?? 0}
+                onContinue={() => {
+                  clearSuggestionTimer();
+                  recordSuggestionCleared(pendingSuggestion.id);
+                  clearCart();
+                  setTargetRestaurantId(pendingSuggestion.id);
+                  router.push(`/restaurant-confirm?restaurantId=${pendingSuggestion.id}`);
+                }}
+                onDismiss={dismissPendingSuggestion}
+              />
+            )}
+          </AnimatePresence>,
+          document.body,
+        )
+      : null;
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      {/* Toast overlay */}
-      <AnimatePresence mode="wait">
-        {pendingSuggestion && (
-          <SuggestionToast
-            key={pendingSuggestion.id}
-            restaurant={pendingSuggestion}
-            likeCount={swipeState.restaurantLikes[pendingSuggestion.id] ?? 0}
-            onContinue={() => {
-              clearSuggestionTimer();
-              clearCart();
-              setTargetRestaurantId(pendingSuggestion.id);
-              router.push(`/restaurant-confirm?restaurantId=${pendingSuggestion.id}`);
-            }}
-            onDismiss={dismissPendingSuggestion}
-          />
-        )}
-      </AnimatePresence>
+      {toastLayer}
 
       <GrubrHeader />
 
@@ -467,63 +505,74 @@ export default function SwipingPage() {
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.06, ...SPRING }}
-          className="hidden lg:flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-r border-white/10 px-5 py-6"
+          className="hidden lg:flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-r border-white/10 px-6 py-7"
         >
+          {/* Header */}
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.20em] text-oo-s mb-1">
+            <p
+              className="text-xl font-extrabold text-white"
+              style={{ fontFamily: "var(--font-syne)" }}
+            >
               For You
             </p>
-            <p className="text-xs text-oo-xs">
+            <p className="mt-1 text-sm text-white/65">
               Restaurants Grubr thinks you&apos;ll love
             </p>
           </div>
 
+          {/* Status card */}
           {suggestions.length === 0 ? (
-            <div className="flex flex-col gap-3 rounded-2xl border border-oo-xs bg-gl p-5 backdrop-blur-md">
-              <span className="text-3xl">🎯</span>
+            <div className="flex flex-col gap-4 rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
+              <span className="text-4xl">🎯</span>
               <div>
-                <p className="text-sm font-semibold text-oo-m">Discovering your taste…</p>
-                <p className="mt-1 text-xs leading-relaxed text-oo-s">
-                  Like {LIKES_THRESHOLD_SUGGEST}+ dishes from the same spot and we&apos;ll suggest it here — with a sweeping notification.
+                <p className="text-base font-bold text-white">Discovering your taste…</p>
+                <p className="mt-2 text-sm leading-relaxed text-white/75">
+                  Like {LIKES_THRESHOLD_SUGGEST}+ dishes from the same spot and we&apos;ll suggest that restaurant here with a notification.
                 </p>
               </div>
             </div>
           ) : pendingSuggestion ? (
-            <div className="rounded-2xl border border-oo-xs bg-gl p-5 backdrop-blur-md">
-              <p className="text-sm font-semibold text-oo-m">👀 Heads up</p>
-              <p className="mt-2 text-xs leading-relaxed text-oo-s">
-                A restaurant suggestion just slid in from the right — it auto-hides in ~10 seconds unless you act on it.
+            <div className="rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
+              <p className="text-base font-bold text-white">👀 Heads up</p>
+              <p className="mt-2 text-sm leading-relaxed text-white/75">
+                A restaurant suggestion just slid in from the right — auto-hides in ~10 s.
               </p>
             </div>
           ) : (
-            <div className="rounded-2xl border border-oo-xs bg-gl p-5 backdrop-blur-md">
-              <p className="text-sm font-semibold text-oo-m">👍 Dismissed</p>
-              <p className="mt-2 text-xs leading-relaxed text-oo-s">
-                Keep swiping — new picks appear as you like more dishes from the same spot.
+            <div className="rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
+              <p className="text-base font-bold text-white">👍 Snoozed</p>
+              <p className="mt-2 text-sm leading-relaxed text-white/75">
+                Keep swiping. Like {LIKES_THRESHOLD_SUGGEST} more dishes from the same place and we&apos;ll nudge you again.
               </p>
             </div>
           )}
 
-          {/* Like tallies */}
+          {/* Interest meter */}
           {Object.keys(swipeState.restaurantLikes).length > 0 && (
-            <div className="rounded-2xl border border-oo-xs bg-gl p-4 backdrop-blur-md">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-oo-s mb-3">
+            <div className="rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
+              <p className="mb-4 text-xs font-bold uppercase tracking-widest text-white/50">
                 Interest meter
               </p>
-              <div className="space-y-2.5">
+              <div className="space-y-5">
                 {Object.entries(swipeState.restaurantLikes).map(([id, count]) => {
                   const r = getRestaurantById(id);
                   if (!r) return null;
+                  const pct = Math.min(100, (count / LIKES_THRESHOLD_SUGGEST) * 100);
+                  const reached = count >= LIKES_THRESHOLD_SUGGEST;
                   return (
                     <div key={id}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-oo-m truncate">{r.name}</span>
-                        <span className="text-xs font-bold text-oo-m ml-2">{count}</span>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-semibold text-white truncate">{r.name}</span>
+                        <span className={`text-sm font-bold ml-2 shrink-0 ${reached ? "text-white" : "text-white/60"}`}>
+                          {count} / {LIKES_THRESHOLD_SUGGEST}
+                        </span>
                       </div>
-                      <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-white/60 transition-all duration-500"
-                          style={{ width: `${Math.min(100, (count / LIKES_THRESHOLD_SUGGEST) * 100)}%` }}
+                      <div className="h-2.5 w-full rounded-full bg-white/15 overflow-hidden">
+                        <motion.div
+                          className={`h-full rounded-full ${reached ? "bg-white" : "bg-white/55"}`}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${pct}%` }}
+                          transition={{ duration: 0.5, ease: "easeOut" }}
                         />
                       </div>
                     </div>
@@ -537,7 +586,7 @@ export default function SwipingPage() {
             <button
               type="button"
               onClick={handleReset}
-              className="w-full rounded-xl border border-oo-xs bg-gl px-4 py-3 text-xs font-semibold text-oo-m backdrop-blur-md transition-colors hover:bg-gl-hv"
+              className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-sm font-semibold text-white/80 backdrop-blur-md transition-colors hover:bg-white/16"
             >
               Reset data & memory
             </button>

@@ -41,44 +41,50 @@
   --font-sans:    var(--font-dm-sans);
   --font-display: var(--font-syne);
 
-  --color-brand:    var(--g-brand);
-  --color-brand-dk: var(--g-brand-dk);
-  --color-brand-lt: var(--g-brand-lt);
+  /* Direct hex values so Tailwind v4 resolves them at build time */
+  --color-brand:    #FF5500;
+  --color-brand-dk: #CC3D00;
+  --color-brand-lt: #FF7A33;
 
-  --color-s0: var(--g-s0);
-  --color-s1: var(--g-s1);
-  --color-s2: var(--g-s2);
-  --color-s3: var(--g-s3);
+  /* Warm white surfaces */
+  --color-s0: #FFFFFF;
+  --color-s1: #FFFCF8;
+  --color-s2: #FFF5EC;
+  --color-s3: #FFE8D4;
 
-  --color-i0: var(--g-i0);
-  --color-i1: var(--g-i1);
-  --color-i2: var(--g-i2);
-  --color-i3: var(--g-i3);
+  /* Dark ink — used on white cards */
+  --color-i0: #1A0900;
+  --color-i1: #552200;
+  --color-i2: #9B6040;
+  --color-i3: #C89A7A;
 
-  --color-b0: var(--g-b0);
-  --color-b1: var(--g-b1);
-  --color-b2: var(--g-b2);
+  /* Borders */
+  --color-b0: rgba(255,255,255,0.20);
+  --color-b1: #F0E4D6;
+  --color-b2: #DEC8B0;
 
-  --color-oo:   var(--g-oo);
-  --color-oo-m: var(--g-oo-m);
-  --color-oo-s: var(--g-oo-s);
-  --color-oo-xs:var(--g-oo-xs);
+  /* Text on orange */
+  --color-oo:   #FFFFFF;
+  --color-oo-m: rgba(255,255,255,0.82);
+  --color-oo-s: rgba(255,255,255,0.52);
+  --color-oo-xs:rgba(255,255,255,0.28);
 
-  --color-gl:   var(--g-gl);
-  --color-gl-b: var(--g-gl-b);
+  /* Glass surfaces */
+  --color-gl:   rgba(255,255,255,0.10);
+  --color-gl-b: rgba(255,255,255,0.18);
 
-  /* ── Backward-compat aliases for existing classes ── */
-  --color-grubr-orange:          var(--g-brand);
-  --color-grubr-orange-dark:     var(--g-brand-dk);
-  --color-grubr-orange-light:    var(--g-s2);
-  --color-grubr-cream:           var(--g-bg-a);
-  --color-grubr-page:            var(--g-bg-a);
-  --color-grubr-surface:         var(--g-s0);
-  --color-grubr-ink:             var(--g-i0);
-  --color-grubr-muted-ink:       var(--g-i2);
-  --color-grubr-muted:           var(--g-oo-m);
-  --color-grubr-border:          var(--g-b0);
-  --color-grubr-border-surface:  var(--g-b1);
+  /* Backward-compat aliases */
+  --color-grubr-orange:          #FF5500;
+  --color-grubr-orange-dark:     #CC3D00;
+  --color-grubr-orange-light:    #FFF5EC;
+  --color-grubr-cream:           #FF6820;
+  --color-grubr-page:            #FF6820;
+  --color-grubr-surface:         #FFFFFF;
+  --color-grubr-ink:             #1A0900;
+  --color-grubr-muted-ink:       #9B6040;
+  --color-grubr-muted:           rgba(255,255,255,0.82);
+  --color-grubr-border:          rgba(255,255,255,0.20);
+  --color-grubr-border-surface:  #F0E4D6;
 }
 
 /* ─────────────────────────────────────────── */
@@ -188,6 +194,15 @@ button { cursor: pointer; font-family: inherit; }
   background: linear-gradient(90deg, var(--g-s3) 25%, var(--g-s2) 50%, var(--g-s3) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* Safety net: white surfaces always render dark text regardless of body color */
+.bg-white,
+.bg-s0,
+.bg-s1,
+.bg-s2,
+.bg-s3 {
+  color: #1A0900;
 }
 
 /* Glass card base */

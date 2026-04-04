@@ -50,7 +50,7 @@ export default function RestaurantConfirmPage() {
           initial={{ opacity: 0, y: 24, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={SPRING}
-          className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl shadow-black/20"
+          className="w-full max-w-lg overflow-hidden rounded-3xl bg-white text-gray-900 shadow-2xl shadow-black/20"
         >
           {/* Hero area */}
           <div className={`relative h-40 overflow-hidden bg-gradient-to-br ${visual.gradient}`}>
@@ -60,7 +60,7 @@ export default function RestaurantConfirmPage() {
               {visual.emoji}
             </div>
             <div className="absolute left-4 bottom-3">
-              <span className="rounded-full border border-white/50 bg-white/70 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-i1 backdrop-blur-sm">
+              <span className="rounded-full border border-white/50 bg-white/70 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-800 backdrop-blur-sm">
                 {restaurant.cuisine}
               </span>
             </div>
@@ -72,20 +72,20 @@ export default function RestaurantConfirmPage() {
               Suggested for you
             </p>
             <h1
-              className="mt-1 text-2xl font-extrabold text-i0"
+              className="mt-1 text-2xl font-extrabold text-gray-900"
               style={{ fontFamily: "var(--font-syne)" }}
             >
               {restaurant.name}
             </h1>
             <div className="mt-1 flex items-center gap-2">
-              <span className="text-sm text-i2">{restaurant.stars.toFixed(1)} ★</span>
-              <span className="text-i3">·</span>
-              <span className="text-sm text-i2">{restaurant.reviewCount} reviews</span>
+              <span className="text-sm text-gray-600">{restaurant.stars.toFixed(1)} ★</span>
+              <span className="text-gray-400">·</span>
+              <span className="text-sm text-gray-600">{restaurant.reviewCount} reviews</span>
             </div>
 
-            <div className="mt-5 rounded-xl border border-b1 bg-s1 p-3.5">
-              <p className="text-sm font-semibold text-i0">How would you like to proceed?</p>
-              <p className="mt-1 text-xs leading-relaxed text-i2">
+            <div className="mt-5 rounded-xl border border-stone-200 bg-stone-50 p-3.5">
+              <p className="text-sm font-semibold text-gray-900">How would you like to proceed?</p>
+              <p className="mt-1 text-xs leading-relaxed text-gray-600">
                 Keep swiping on this restaurant&apos;s dishes one-by-one, or browse their full menu imported directly from Grubhub.
               </p>
             </div>
@@ -106,7 +106,7 @@ export default function RestaurantConfirmPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={() => router.push(`/restaurant-menu?restaurantId=${restaurant.id}`)}
-                className="rounded-xl border-2 border-b2 bg-s1 py-3.5 text-sm font-bold text-i0 transition-all hover:bg-s2"
+                className="rounded-xl border-2 border-stone-200 bg-stone-50 py-3.5 text-sm font-bold text-gray-900 transition-all hover:bg-stone-100"
               >
                 <span className="block text-lg mb-0.5">📋</span>
                 Browse full menu
