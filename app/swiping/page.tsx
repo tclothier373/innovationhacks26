@@ -147,24 +147,34 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
           className="relative cursor-grab touch-pan-y overflow-hidden rounded-[2rem] bg-white shadow-[0_32px_72px_-12px_rgba(80,20,0,0.22),0_8px_24px_-4px_rgba(80,20,0,0.10)] will-change-transform active:cursor-grabbing"
         >
           {/* Food hero area */}
-          <div className={`relative h-60 overflow-hidden bg-gradient-to-br ${visual.gradient}`}>
-            {/* Ambient orbs */}
-            <div className={`absolute -top-12 -right-12 h-56 w-56 rounded-full blur-3xl ${visual.orbA} animate-orb-a`} />
-            <div className={`absolute bottom-0 left-0 h-44 w-44 rounded-full blur-2xl ${visual.orbB} animate-orb-b`} style={{ animationDelay: "0.8s" }} />
-            <div className={`absolute top-10 left-1/2 h-32 w-32 -translate-x-1/2 rounded-full blur-xl ${visual.orbC} animate-orb-c`} style={{ animationDelay: "1.6s" }} />
+          <div className={`relative h-60 overflow-hidden ${item.imageUrl ? "bg-black" : `bg-gradient-to-br ${visual.gradient}`}`}>
+            {item.imageUrl ? (
+              /* Real food photo from Places API / restaurant website */
+              <img
+                src={item.imageUrl}
+                alt={item.name}
+                className="absolute inset-0 h-full w-full object-cover opacity-90"
+                draggable={false}
+              />
+            ) : (
+              /* Fallback: animated gradient + cuisine emoji */
+              <>
+                <div className={`absolute -top-12 -right-12 h-56 w-56 rounded-full blur-3xl ${visual.orbA} animate-orb-a`} />
+                <div className={`absolute bottom-0 left-0 h-44 w-44 rounded-full blur-2xl ${visual.orbB} animate-orb-b`} style={{ animationDelay: "0.8s" }} />
+                <div className={`absolute top-10 left-1/2 h-32 w-32 -translate-x-1/2 rounded-full blur-xl ${visual.orbC} animate-orb-c`} style={{ animationDelay: "1.6s" }} />
+                <motion.div
+                  initial={{ scale: 0.7, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.12, type: "spring", stiffness: 400, damping: 24 }}
+                  className="absolute inset-0 flex items-center justify-center text-[100px] select-none"
+                  style={{ filter: "drop-shadow(0 12px 32px rgba(0,0,0,0.14))" }}
+                >
+                  {visual.emoji}
+                </motion.div>
+              </>
+            )}
 
-            {/* Emoji */}
-            <motion.div
-              initial={{ scale: 0.7, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.12, type: "spring", stiffness: 400, damping: 24 }}
-              className="absolute inset-0 flex items-center justify-center text-[100px] select-none"
-              style={{ filter: "drop-shadow(0 12px 32px rgba(0,0,0,0.14))" }}
-            >
-              {visual.emoji}
-            </motion.div>
-
-            {/* Cuisine pill */}
+            {/* Cuisine pill — always visible */}
             <div className="absolute bottom-4 left-4">
               <span className="rounded-full border border-white/50 bg-white/75 px-3 py-1 text-xs font-bold uppercase tracking-wider text-gray-800 backdrop-blur-sm">
                 {restaurant.cuisine}

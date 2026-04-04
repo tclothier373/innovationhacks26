@@ -6,6 +6,7 @@ export type FoodItem = {
   name: string;
   description: string;
   tags: string[];
+  imageUrl?: string;
 };
 
 export type Restaurant = {

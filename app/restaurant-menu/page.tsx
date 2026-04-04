@@ -135,9 +135,18 @@ export default function RestaurantMenuPage() {
                   transition={{ delay: i * 0.06, ...SPRING }}
                   className="group overflow-hidden rounded-2xl bg-white text-gray-900 shadow-md shadow-black/8 transition-shadow hover:shadow-lg"
                 >
-                  {/* Mini gradient header */}
-                  <div className={`h-10 bg-gradient-to-r ${visual.gradient} relative overflow-hidden`}>
-                    <div className={`absolute -right-3 -top-3 h-12 w-12 rounded-full blur-xl ${visual.orbA}`} />
+                  {/* Item image or gradient header */}
+                  <div className={`relative h-28 overflow-hidden ${item.imageUrl ? "bg-black" : `bg-gradient-to-r ${visual.gradient}`}`}>
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        className="absolute inset-0 h-full w-full object-cover opacity-90"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className={`absolute -right-3 -top-3 h-12 w-12 rounded-full blur-xl ${visual.orbA}`} />
+                    )}
                   </div>
 
                   <div className="px-4 py-3">

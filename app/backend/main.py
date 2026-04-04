@@ -2,8 +2,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
-import re
-import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -378,6 +376,7 @@ def _normalize_menu_matrix(
                             for t in tags
                             if t
                         ][:8],
+                        "image_url": it.get("image_url") or None,
                     }
                 )
         if len(cleaned) < 3:
@@ -432,463 +431,161 @@ Each inner array must have 3 to 5 items.
     return None
 
 
-_GRUBHUB_URL_RE = re.compile(
-    r"https?://(?:www\.)?grubhub\.com/restaurant/[^\s\"'<>)\]]+",
-    re.IGNORECASE,
-)
+# ---- Google Places Details + photo helpers ----
 
 
-def _normalize_grubhub_url(raw: Any) -> Optional[str]:
-    if raw is None:
-        return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    m = _GRUBHUB_URL_RE.search(s)
-    if not m:
-        return None
-    url = m.group(0).rstrip(".,);'\"")
-    if "?" in url:
-        url = url.split("?", 1)[0]
-    return url if url.lower().startswith("http") else None
-
-
-def _llm_grubhub_urls_batch(slim: list[dict[str, Any]]) -> list[Optional[str]]:
-    """Ask Gemini/Vertex for Grubhub listing URLs; validate shape. Prototype / demo use."""
-    if not slim:
-        return []
-    n = len(slim)
-    if _genai_model is None and _vertex_model is None:
-        return [None] * n
-
-    prompt = f"""You map restaurants from a discovery app to official Grubhub restaurant menu page URLs.
-
-Input (JSON array, fixed order — each entry may include name, cuisine, vicinity or formatted_address from Google Places):
-{json.dumps(slim, ensure_ascii=False)}
-
-Task:
-- For EACH entry in the same order, output the best matching **Grubhub** menu URL if you can determine it with high confidence (e.g. unambiguous national/regional chain with a well-known Grubhub slug).
-- Use **vicinity** or **formatted_address** to disambiguate when the same brand appears in different cities.
-- If the venue is independent, ambiguous, or you are not sure of the exact `/restaurant/...` path on grubhub.com, use null.
-- **Never** guess random numeric IDs or invent paths — prefer null.
-
-Return ONLY valid JSON:
-{{
-  "urls": [ "https://www.grubhub.com/restaurant/..." or null ]
-}}
-The array **urls** must have exactly {n} elements in the same order as the input array.
-"""
-
-    parsed: Optional[dict] = None
-    if _genai_model is not None:
-        try:
-            r = _genai_model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"},
-            )
-            parsed = _parse_json_from_model(getattr(r, "text", "") or "")
-        except Exception:
-            parsed = None
-    if parsed is None and _vertex_model is not None:
-        try:
-            response = _vertex_model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"},
-            )
-            parsed = _parse_json_from_model(getattr(response, "text", "") or "")
-        except Exception:
-            parsed = None
-
-    if not isinstance(parsed, dict):
-        return [None] * n
-    raw_list = parsed.get("urls")
-    if not isinstance(raw_list, list):
-        return [None] * n
-
-    out: list[Optional[str]] = []
-    for i in range(n):
-        cell = raw_list[i] if i < len(raw_list) else None
-        out.append(_normalize_grubhub_url(cell))
-    return out
-
-
-def _resolve_grubhub_urls(
-    restaurants: list[Any], n: int, payload: dict[str, Any]
-) -> list[Optional[str]]:
-    top = payload.get("prototypeGrubhubUrls") or payload.get("prototype_grubhub_urls")
-    top_list: list[str] = []
-    if isinstance(top, list):
-        top_list = [str(x).strip() for x in top if str(x).strip()]
-    env_raw = os.getenv("GRUBHUB_PROTOTYPE_URLS", "").strip()
-    env_list = [x.strip() for x in env_raw.split(",") if x.strip()]
-
-    out: list[Optional[str]] = []
-    for i in range(n):
-        u: Optional[str] = None
-        r = restaurants[i] if i < len(restaurants) else None
-        if isinstance(r, dict):
-            v = r.get("grubhub_url") or r.get("grubhubUrl")
-            if isinstance(v, str) and v.strip():
-                u = v.strip()
-        if not u and i < len(top_list):
-            u = top_list[i]
-        if not u and i < len(env_list):
-            u = env_list[i]
-        out.append(u)
-    return out
-
-
-def _resolve_scrape_urls_with_gemini(
-    restaurants: list[Any],
-    n: int,
-    payload: dict[str, Any],
-    slim: list[dict[str, Any]],
-) -> list[Optional[str]]:
-    """Manual/env URLs first; then Gemini fills missing slots (when lookup enabled)."""
-    urls = _resolve_grubhub_urls(restaurants, n, payload)
-    disabled = os.getenv("DISABLE_GEMINI_GRUBHUB_URL_LOOKUP", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
-    if disabled:
-        return urls
-    guessed = _llm_grubhub_urls_batch(slim)
-    for i in range(n):
-        if urls[i] is None and i < len(guessed) and guessed[i]:
-            urls[i] = guessed[i]
-    return urls
-
-
-def _options_summary_for_description(options: Any) -> str:
-    if not options:
-        return ""
+def _get_place_details(place_id: str, api_key: str) -> dict:
+    """Fetch website URL and photo references from Places Details API."""
+    print(f"[places-details] fetching details for {place_id}", flush=True)
     try:
-        if isinstance(options, dict):
-            bits: list[str] = []
-            for k, v in list(options.items())[:5]:
-                if isinstance(v, dict):
-                    bits.append(
-                        f"{k}: {', '.join(str(ik) for ik in list(v.keys())[:4])}"
-                    )
-                elif isinstance(v, list):
-                    bits.append(f"{k}: {', '.join(str(x) for x in v[:4])}")
-                else:
-                    bits.append(f"{k}: {v}")
-            return " · ".join(bits)[:200]
-        return str(options)[:200]
-    except Exception:
-        return ""
+        res = requests.get(
+            "https://maps.googleapis.com/maps/api/place/details/json",
+            params={"place_id": place_id, "fields": "name,website,photos", "key": api_key},
+            timeout=10,
+        )
+        if res.ok:
+            result = res.json().get("result") or {}
+            website = result.get("website")
+            photos = result.get("photos") or []
+            print(f"[places-details] {place_id}: website={website!r} photos={len(photos)}", flush=True)
+            return {"website": website, "photos": photos}
+    except Exception as e:
+        print(f"[places-details] exception: {e}", flush=True)
+    return {"website": None, "photos": []}
 
 
-def _full_menu_to_proposed_items(
-    full_menu: dict[str, list[Any]], max_items: int = 5
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    if not full_menu or not isinstance(full_menu, dict):
-        return out
-    for category, entries in full_menu.items():
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if len(out) >= max_items:
-                return out
-            if not isinstance(entry, dict):
-                continue
-            name = str(entry.get("name") or "").strip()
-            if not name:
-                continue
-            price = str(entry.get("price") or "").strip()
-            opt = _options_summary_for_description(entry.get("options"))
-            desc_bits = [b for b in [price, str(category), opt] if b]
-            desc = " · ".join(desc_bits)[:280] or f"From the {category} section."
-            tagparts = [
-                t
-                for t in str(category).lower().replace("&", " ").split()
-                if len(t) > 2
-            ][:3]
-            tags = list(dict.fromkeys([*tagparts, "popular"]))[:8]
-            out.append({"name": name[:120], "description": desc, "tags": tags})
-    return out
-
-
-_GRUBHUB_WEB_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-}
-
-
-def _grubhub_search_restaurant_url(
-    name: str,
-    address: Optional[str],
-    lat: Optional[float],
-    lng: Optional[float],
-) -> Optional[str]:
-    """
-    Search grubhub.com and return the relative restaurant path (/restaurant/slug/id).
-    Parses __NEXT_DATA__ JSON embedded in the search results page.
-    """
-    location = address or (f"{lat},{lng}" if lat is not None and lng is not None else "")
-    params: dict[str, str] = {"queryText": name}
-    if location:
-        params["location"] = location
-
-    print(f"[grubhub-web] searching www.grubhub.com/search for '{name}' location={location!r}", flush=True)
+def _resolve_photo_url(photo_reference: str, api_key: str) -> Optional[str]:
+    """Follow the Places Photo redirect to get the real image URL (lh3.googleusercontent.com)."""
     try:
-        resp = requests.get(
-            "https://www.grubhub.com/search",
-            params=params,
-            headers=_GRUBHUB_WEB_HEADERS,
-            timeout=20,
+        res = requests.get(
+            "https://maps.googleapis.com/maps/api/place/photo",
+            params={"maxwidth": "600", "photo_reference": photo_reference, "key": api_key},
+            timeout=10,
             allow_redirects=True,
         )
-        print(f"[grubhub-web] search HTTP {resp.status_code} final_url={resp.url}", flush=True)
-        if not resp.ok:
-            print(f"[grubhub-web] non-OK: {resp.text[:300]}", flush=True)
-            return None
+        if res.ok and "googleusercontent.com" in res.url:
+            return res.url
+        # Check redirect history
+        for r in res.history:
+            loc = r.headers.get("location", "")
+            if "googleusercontent.com" in loc or "ggpht.com" in loc:
+                return loc
     except Exception as e:
-        print(f"[grubhub-web] search request exception: {e}", flush=True)
-        return None
-
-    html = resp.text
-    # Locate the embedded Next.js data blob
-    m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
-    if not m:
-        print(f"[grubhub-web] no __NEXT_DATA__ in search page (page len={len(html)})", flush=True)
-        # Log first 500 chars to see if it's a bot challenge / redirect
-        print(f"[grubhub-web] page head: {html[:500]!r}", flush=True)
-        return None
-
-    raw_json = m.group(1).strip()
-    print(f"[grubhub-web] __NEXT_DATA__ found ({len(raw_json)} chars)", flush=True)
-    try:
-        page_data = json.loads(raw_json)
-    except Exception as e:
-        print(f"[grubhub-web] JSON parse error: {e}", flush=True)
-        return None
-
-    # Navigate the data tree to find restaurant listings
-    # Path varies by Grubhub version; try several known shapes
-    def _dig(obj: Any, *keys: str) -> Any:
-        for k in keys:
-            if not isinstance(obj, dict):
-                return None
-            obj = obj.get(k)
-        return obj
-
-    candidates: list[dict] = []
-    # Shape 1: props.pageProps.searchResults.restaurantList.results
-    r1 = _dig(page_data, "props", "pageProps", "searchResults", "restaurantList", "results")
-    if isinstance(r1, list):
-        candidates = r1
-    # Shape 2: props.pageProps.initialData.searchResults.results
-    if not candidates:
-        r2 = _dig(page_data, "props", "pageProps", "initialData", "searchResults", "results")
-        if isinstance(r2, list):
-            candidates = r2
-    # Shape 3: props.pageProps.restaurants
-    if not candidates:
-        r3 = _dig(page_data, "props", "pageProps", "restaurants")
-        if isinstance(r3, list):
-            candidates = r3
-
-    print(f"[grubhub-web] found {len(candidates)} candidate restaurants in page data", flush=True)
-
-    name_lower = name.lower()
-    best_url: Optional[str] = None
-    best_score = -1
-
-    for c in candidates:
-        rest = c.get("restaurant") if isinstance(c, dict) else c
-        if not isinstance(rest, dict):
-            continue
-        rname = str(rest.get("name") or "").lower()
-        slug = rest.get("slug") or rest.get("restaurant_slug") or ""
-        rid = rest.get("restaurant_id") or rest.get("id") or ""
-        score = sum(1 for word in name_lower.split() if word in rname)
-        print(f"[grubhub-web]   candidate name={rname!r} slug={slug!r} id={rid} score={score}", flush=True)
-        if score > best_score and (slug or rid):
-            best_score = score
-            if slug and rid:
-                best_url = f"/restaurant/{slug}/{rid}"
-            elif slug:
-                best_url = f"/restaurant/{slug}"
-
-    if best_url:
-        print(f"[grubhub-web] best match: {best_url!r} (score={best_score})", flush=True)
-    else:
-        print(f"[grubhub-web] no usable match found for '{name}'", flush=True)
-        # Dump top-level keys so we know where to look next
-        print(f"[grubhub-web] __NEXT_DATA__ top keys: {list(page_data.keys())}", flush=True)
-        props_keys = list((_dig(page_data, "props") or {}).keys())
-        print(f"[grubhub-web] props keys: {props_keys}", flush=True)
-        pp_keys = list((_dig(page_data, "props", "pageProps") or {}).keys())
-        print(f"[grubhub-web] pageProps keys: {pp_keys}", flush=True)
-
-    return best_url
+        print(f"[places-photo] exception: {e}", flush=True)
+    return None
 
 
-def _grubhub_fetch_menu_from_page(restaurant_path: str) -> dict[str, list[dict[str, Any]]]:
+def _scrape_website_menu(url: str) -> list[dict[str, Any]]:
     """
-    Load a Grubhub restaurant menu page and extract menu items from __NEXT_DATA__.
-    restaurant_path: relative path like /restaurant/some-slug/123456
+    Scrape a restaurant website for menu items using JSON-LD schema.org/Menu.
+    Returns list of {name, description, image_url} dicts.
     """
-    url = f"https://www.grubhub.com{restaurant_path}"
-    print(f"[grubhub-web] fetching menu page: {url}", flush=True)
-    try:
-        resp = requests.get(url, headers=_GRUBHUB_WEB_HEADERS, timeout=20, allow_redirects=True)
-        print(f"[grubhub-web] menu page HTTP {resp.status_code}", flush=True)
-        if not resp.ok:
-            return {}
-    except Exception as e:
-        print(f"[grubhub-web] menu page request exception: {e}", flush=True)
-        return {}
-
-    html = resp.text
-    m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
-    if not m:
-        print(f"[grubhub-web] no __NEXT_DATA__ in menu page (page len={len(html)})", flush=True)
-        print(f"[grubhub-web] menu page head: {html[:500]!r}", flush=True)
-        return {}
-
-    raw_json = m.group(1).strip()
-    print(f"[grubhub-web] menu page __NEXT_DATA__ ({len(raw_json)} chars)", flush=True)
-    try:
-        page_data = json.loads(raw_json)
-    except Exception as e:
-        print(f"[grubhub-web] menu JSON parse error: {e}", flush=True)
-        return {}
-
-    def _dig(obj: Any, *keys: str) -> Any:
-        for k in keys:
-            if not isinstance(obj, dict):
-                return None
-            obj = obj.get(k)
-        return obj
-
-    # Try several known data shapes for the menu
-    menu_categories: list = []
-    # Shape 1: props.pageProps.menu.menuCategories
-    mc1 = _dig(page_data, "props", "pageProps", "menu", "menuCategories")
-    if isinstance(mc1, list):
-        menu_categories = mc1
-    # Shape 2: props.pageProps.initialData.restaurant.menu_category_list
-    if not menu_categories:
-        mc2 = _dig(page_data, "props", "pageProps", "initialData", "restaurant", "menu_category_list")
-        if isinstance(mc2, list):
-            menu_categories = mc2
-    # Shape 3: props.pageProps.restaurant.menu_category_list
-    if not menu_categories:
-        mc3 = _dig(page_data, "props", "pageProps", "restaurant", "menu_category_list")
-        if isinstance(mc3, list):
-            menu_categories = mc3
-
-    print(f"[grubhub-web] found {len(menu_categories)} menu categories", flush=True)
-
-    if not menu_categories:
-        pp_keys = list((_dig(page_data, "props", "pageProps") or {}).keys())
-        print(f"[grubhub-web] pageProps keys for debug: {pp_keys}", flush=True)
-
-    full_menu: dict[str, list[dict[str, Any]]] = {}
-    for cat in menu_categories:
-        if not isinstance(cat, dict):
-            continue
-        cat_name = str(cat.get("name") or cat.get("category_name") or "Menu").strip() or "Menu"
-        items = cat.get("menuItems") or cat.get("menu_item_list") or []
-        parsed: list[dict[str, Any]] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_name = str(item.get("name") or item.get("item_name") or "").strip()
-            if not item_name:
-                continue
-            raw_price = item.get("price") or item.get("minimum_price_cents")
-            price_str = ""
-            if isinstance(raw_price, (int, float)) and raw_price > 0:
-                price_str = f"${raw_price / 100:.2f}"
-            desc = str(item.get("description") or "").strip()
-            parsed.append({"name": item_name, "price": price_str, "description": desc, "options": {}})
-        print(f"[grubhub-web]   cat '{cat_name}': {len(parsed)} items", flush=True)
-        if parsed:
-            full_menu[cat_name] = parsed
-
-    total = sum(len(v) for v in full_menu.values())
-    print(f"[grubhub-web] total menu items: {total}", flush=True)
-    return full_menu
-
-
-def _fetch_grubhub_menu_for_restaurant(
-    name: str,
-    address: Optional[str],
-    lat: Optional[float],
-    lng: Optional[float],
-) -> dict[str, list[dict[str, Any]]]:
-    """Search grubhub.com for a restaurant and scrape its menu from the HTML."""
-    path = _grubhub_search_restaurant_url(name, address, lat, lng)
-    if not path:
-        return {}
-    return _grubhub_fetch_menu_from_page(path)
-
-
-def _scrape_grubhub_menu_by_url(url: str) -> dict[str, list[dict[str, Any]]]:
-    """Fallback: headless Chrome scrape when we have a known Grubhub menu URL."""
     from bs4 import BeautifulSoup
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
+    from urllib.parse import urljoin
 
-    opts = Options()
-    opts.add_argument("--headless=new")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1920,1080")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
-    browser = webdriver.Chrome(options=opts)
-    full_menu: dict[str, list[dict[str, Any]]] = {}
-    try:
-        browser.get(url)
-        time.sleep(10)
-        html = BeautifulSoup(browser.page_source, "html.parser")
-        menu = html.find(class_="menuSectionsContainer")
-        if menu is None:
-            return {}
-        cats = menu.find_all("ghs-restaurant-menu-section")
-        if len(cats) > 1:
-            cats = cats[1:]
-        if not cats:
-            return {}
+    def _fetch_and_parse(fetch_url: str) -> tuple[Optional[Any], str]:
+        try:
+            r = requests.get(fetch_url, headers=headers, timeout=12, allow_redirects=True)
+            if r.ok:
+                return BeautifulSoup(r.text, "html.parser"), r.url
+        except Exception as e:
+            print(f"[website-scrape] fetch {fetch_url} exception: {e}", flush=True)
+        return None, fetch_url
 
-        for cat in cats:
-            h3 = cat.find("h3", class_="menuSection-title")
-            title = (h3.get_text(strip=True) if h3 else "") or "Menu"
-            names = [
-                a.get_text(strip=True)
-                for a in cat.find_all("a", class_="menuItem-name")
-            ]
-            prices_list = [
-                p.get_text(strip=True)
-                for p in cat.find_all("span", class_="menuItem-displayPrice")
-            ]
-            all_items: list[dict[str, Any]] = []
-            for j, itm_name in enumerate(names):
-                price = prices_list[j] if j < len(prices_list) else ""
-                all_items.append({"name": itm_name, "price": price, "options": {}})
-            if all_items:
-                full_menu[title] = all_items
-        return full_menu
-    finally:
-        browser.quit()
+    def _extract_jsonld_items(soup: Any) -> list[dict]:
+        found: list[dict] = []
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                raw = script.string or ""
+                if not raw.strip():
+                    continue
+                data = json.loads(raw)
+                nodes = data if isinstance(data, list) else [data]
+                flat: list[Any] = []
+                for n in nodes:
+                    if isinstance(n, dict) and "@graph" in n:
+                        flat.extend(n["@graph"])
+                    else:
+                        flat.append(n)
+                for node in flat:
+                    if not isinstance(node, dict):
+                        continue
+                    typ = node.get("@type") or ""
+                    if typ in ("Menu", "MenuSection", "FoodEstablishment", "Restaurant"):
+                        sections = node.get("hasMenuSection") or [node]
+                        if isinstance(sections, dict):
+                            sections = [sections]
+                        for section in sections:
+                            if not isinstance(section, dict):
+                                continue
+                            menu_items = section.get("hasMenuItem") or []
+                            if isinstance(menu_items, dict):
+                                menu_items = [menu_items]
+                            for item in menu_items:
+                                if not isinstance(item, dict):
+                                    continue
+                                name = str(item.get("name") or "").strip()
+                                if not name:
+                                    continue
+                                desc = str(item.get("description") or "").strip()
+                                img_raw = item.get("image")
+                                img = None
+                                if isinstance(img_raw, str):
+                                    img = img_raw
+                                elif isinstance(img_raw, dict):
+                                    img = img_raw.get("url") or img_raw.get("@id")
+                                found.append({"name": name, "description": desc, "image_url": img})
+                    elif typ == "MenuItem":
+                        name = str(node.get("name") or "").strip()
+                        if name:
+                            desc = str(node.get("description") or "").strip()
+                            img_raw = node.get("image")
+                            img = img_raw if isinstance(img_raw, str) else None
+                            found.append({"name": name, "description": desc, "image_url": img})
+            except Exception:
+                continue
+        return found
+
+    print(f"[website-scrape] fetching {url}", flush=True)
+    soup, final_url = _fetch_and_parse(url)
+    if soup is None:
+        return []
+
+    items = _extract_jsonld_items(soup)
+    if items:
+        print(f"[website-scrape] {len(items)} items via JSON-LD on homepage", flush=True)
+        return items[:8]
+
+    # Try following a /menu link on the page
+    menu_link: Optional[str] = None
+    for a in soup.find_all("a", href=True):
+        text = (a.get_text(strip=True) or "").lower()
+        href = str(a["href"]).strip()
+        if href.startswith("#") or not href:
+            continue
+        if "menu" in text or "menu" in href.lower():
+            full = href if href.startswith("http") else urljoin(final_url, href)
+            if full != final_url:
+                menu_link = full
+                break
+
+    if menu_link:
+        print(f"[website-scrape] following menu link: {menu_link}", flush=True)
+        menu_soup, _ = _fetch_and_parse(menu_link)
+        if menu_soup:
+            items = _extract_jsonld_items(menu_soup)
+            if items:
+                print(f"[website-scrape] {len(items)} items via JSON-LD on menu page", flush=True)
+                return items[:8]
+
+    print(f"[website-scrape] no structured menu items found for {url}", flush=True)
+    return []
 
 
 @app.post("/menu-proposals")
@@ -909,87 +606,82 @@ async def menu_proposals(request: Request):
     n = len(slim)
     scraped_by_index: list[Optional[list[dict[str, Any]]]] = [None] * n
 
-    # Log the raw restaurant objects so we can verify which fields are present
-    print(f"[menu-proposals] received {len(restaurants)} restaurants. First object keys: {list(restaurants[0].keys()) if restaurants else 'none'}", flush=True)
-    if restaurants:
-        first = restaurants[0]
-        print(f"[menu-proposals] first restaurant sample: name={first.get('name')!r} vicinity={first.get('vicinity')!r} formatted_address={first.get('formatted_address')!r} lat={first.get('lat')} lng={first.get('lng')}", flush=True)
-
-    scraper_env_raw = os.getenv("ENABLE_GRUBHUB_SCRAPER", "")
-    scraper_on = scraper_env_raw.lower() in ("1", "true", "yes")
-    print(f"[menu-proposals] ENABLE_GRUBHUB_SCRAPER={scraper_env_raw!r} -> scraper_on={scraper_on}", flush=True)
-    print(f"[menu-proposals] processing {n} restaurants: {[s.get('name') for s in slim]}", flush=True)
-
-    if scraper_on:
-        # Resolve any manually-specified or env-var Grubhub URLs (used as fallback only)
-        fallback_urls = _resolve_grubhub_urls(restaurants, n, payload)
-
+    if not PLACES_API_KEY:
+        print("[menu-proposals] no PLACES_API_KEY, skipping website scrape", flush=True)
+    else:
         for i in range(n):
-            s = slim[i] if i < len(slim) else {}
             r = restaurants[i] if i < len(restaurants) and isinstance(restaurants[i], dict) else {}
-            name = s.get("name") or r.get("name") or ""
-            address = s.get("vicinity") or s.get("formatted_address") or r.get("vicinity") or r.get("formatted_address") or ""
-            lat = r.get("lat") or r.get("latitude")
-            lng = r.get("lng") or r.get("longitude")
-            try:
-                lat = float(lat) if lat is not None else None
-                lng = float(lng) if lng is not None else None
-            except (TypeError, ValueError):
-                lat = lng = None
+            place_id = r.get("place_id") or ""
+            name = (slim[i].get("name") or r.get("name") or "")
 
-            print(f"[menu-proposals] [{i}] '{name}' | address={address!r} | lat={lat} lng={lng} | fallback_url={fallback_urls[i]!r}", flush=True)
+            if not place_id:
+                print(f"[menu-proposals] [{i}] '{name}' — no place_id, skipping", flush=True)
+                continue
 
-            fm: dict[str, list[dict[str, Any]]] = {}
-            # Primary: API-based search + fetch (no Selenium needed)
-            if name:
-                try:
-                    fm = await run_in_threadpool(
-                        _fetch_grubhub_menu_for_restaurant, name, address or None, lat, lng
-                    )
-                except Exception as e:
-                    print(f"[menu-proposals] [{i}] API fetch exception: {e}", flush=True)
-                    fm = {}
+            # 1. Fetch website + photo references from Places Details
+            details = await run_in_threadpool(_get_place_details, place_id, PLACES_API_KEY)
+            website: Optional[str] = details.get("website")
+            photo_refs: list[str] = [
+                p.get("photo_reference", "")
+                for p in (details.get("photos") or [])
+                if p.get("photo_reference")
+            ][:5]
 
-            print(f"[menu-proposals] [{i}] API fetch returned {sum(len(v) for v in fm.values())} items across {len(fm)} categories", flush=True)
+            print(f"[menu-proposals] [{i}] '{name}' website={website!r} photos={len(photo_refs)}", flush=True)
 
-            # Fallback: Selenium scrape if we have a known URL and API returned nothing
-            if not fm and fallback_urls[i]:
-                print(f"[menu-proposals] [{i}] falling back to Selenium for url={fallback_urls[i]!r}", flush=True)
-                try:
-                    fm = await run_in_threadpool(_scrape_grubhub_menu_by_url, fallback_urls[i])
-                except Exception as e:
-                    print(f"[menu-proposals] [{i}] Selenium fallback exception: {e}", flush=True)
-                    fm = {}
+            # 2. Resolve photo references → real image URLs (parallel)
+            photo_urls: list[Optional[str]] = []
+            for ref in photo_refs:
+                url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
+                photo_urls.append(url)
+            photo_urls_clean = [u for u in photo_urls if u]
+            print(f"[menu-proposals] [{i}] resolved {len(photo_urls_clean)} photo URLs", flush=True)
 
-            if fm:
-                items = _full_menu_to_proposed_items(fm, max_items=5)
-                print(f"[menu-proposals] [{i}] converted to {len(items)} proposed items", flush=True)
-                if len(items) >= 3:
-                    scraped_by_index[i] = items
-                else:
-                    print(f"[menu-proposals] [{i}] only {len(items)} items (need >=3), discarding", flush=True)
-            else:
-                print(f"[menu-proposals] [{i}] no menu data from scraper, will use LLM fallback", flush=True)
+            # 3. Scrape website for real menu items
+            website_items: list[dict[str, Any]] = []
+            if website:
+                website_items = await run_in_threadpool(_scrape_website_menu, website)
+                print(f"[menu-proposals] [{i}] website scrape returned {len(website_items)} items", flush=True)
 
+            # 4. Build proposed items — website items if found, else photo-backed placeholders
+            proposed: list[dict[str, Any]] = []
+            if len(website_items) >= 3:
+                for j, item in enumerate(website_items[:5]):
+                    proposed.append({
+                        "name": item["name"],
+                        "description": item.get("description") or "Popular pick.",
+                        "tags": [],
+                        "image_url": item.get("image_url") or (photo_urls_clean[j % len(photo_urls_clean)] if photo_urls_clean else None),
+                    })
+            elif photo_urls_clean:
+                # No structured menu — use photos with LLM-generated names (filled in later)
+                # Signal by leaving proposed empty so LLM runs, but attach photos after
+                pass
+
+            if len(proposed) >= 3:
+                scraped_by_index[i] = proposed
+            elif photo_urls_clean:
+                # Store photos on the slim entry so the LLM normalizer can attach them
+                slim[i]["_photo_urls"] = photo_urls_clean
+
+    # LLM menu generation (always runs; scraped results override per-slot below)
     parsed = _llm_menu_json(slim)
     menus_raw = parsed.get("menus") if isinstance(parsed, dict) else None
     menus = _normalize_menu_matrix(menus_raw, slim)
 
+    # Attach photos to LLM items for restaurants where we got photos but no website menu
+    for i in range(n):
+        photos = slim[i].get("_photo_urls") or []
+        if photos and not scraped_by_index[i]:
+            for j, item in enumerate(menus[i]):
+                item["image_url"] = photos[j % len(photos)]
+
+    # Override with real website-scraped items where available
     for i in range(n):
         if scraped_by_index[i]:
             menus[i] = scraped_by_index[i]
 
-    any_scrape = any(x is not None for x in scraped_by_index)
-    if any_scrape and parsed:
-        src = "mixed"
-    elif any_scrape:
-        src = "grubhub"
-    elif parsed:
-        src = "gemini"
-    else:
-        src = "default"
+    any_scraped = any(x is not None for x in scraped_by_index)
+    source = "website" if any_scraped else ("gemini" if parsed else "default")
 
-    return {
-        "menus": menus,
-        "source": src,
-    }
+    return {"menus": menus, "source": source}
