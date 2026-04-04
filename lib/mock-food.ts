@@ -7,6 +7,7 @@ export type FoodItem = {
   description: string;
   tags: string[];
   imageUrl?: string;
+  priceCents?: number;
 };
 
 export type Restaurant = {
@@ -254,6 +255,7 @@ function seededInt(seed: string, min: number, max: number): number {
 }
 
 export function getItemPriceCents(item: FoodItem): number {
+  if (item.priceCents && item.priceCents > 0) return item.priceCents;
   return seededInt(item.id + item.name, 899, 2699);
 }
 

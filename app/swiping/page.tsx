@@ -25,6 +25,8 @@ import {
   setSuggestionDismissLikeCheckpoint,
   getProfile,
   getSwipeState,
+  getDiscoveryCache,
+  saveDiscoveryCache,
   resetAllGrubrData,
   saveSwipeState,
   setTargetRestaurantId,
@@ -368,57 +370,70 @@ export default function SwipingPage() {
       const s = getSwipeState();
       const prof = getProfile();
 
-      try {
-        const res = await fetch("/api/discover", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            profile: prof,
-            contextPrompt: s.contextPrompt,
-          }),
-        });
-        const rawText = await res.text();
-        let json: { data?: unknown; menus?: unknown; error?: string; hint?: string } = {};
+      // Check localStorage cache first
+      const cached = getDiscoveryCache(prof, s.contextPrompt);
+      if (cached && !cancelled) {
+        const built = mergeProposedMenusIntoRestaurants(
+          cached.rows as PlacesApiRestaurantRow[],
+          cached.menus as ProposedMenuItem[][],
+        );
+        setDynamicRestaurants(built);
+        setPlacesStatus("ready");
+        setPlacesDiag(null);
+      } else {
         try {
-          json = rawText ? (JSON.parse(rawText) as typeof json) : {};
+          const res = await fetch("/api/discover", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              profile: prof,
+              contextPrompt: s.contextPrompt,
+            }),
+          });
+          const rawText = await res.text();
+          let json: { data?: unknown; menus?: unknown; error?: string; hint?: string } = {};
+          try {
+            json = rawText ? (JSON.parse(rawText) as typeof json) : {};
+          } catch {
+            if (!cancelled) {
+              setPlacesDiag({
+                error: `/api/discover returned invalid JSON (HTTP ${res.status}).`,
+                hint: rawText.slice(0, 160).replace(/\s+/g, " "),
+              });
+              json = { data: [] };
+            }
+          }
+          if (cancelled) return;
+
+          const rows = json.data;
+          const menus = json.menus;
+          if (Array.isArray(rows) && rows.length > 0) {
+            saveDiscoveryCache(prof, s.contextPrompt, rows, Array.isArray(menus) ? menus as unknown[][] : []);
+            const built = mergeProposedMenusIntoRestaurants(
+              rows as PlacesApiRestaurantRow[],
+              Array.isArray(menus) ? (menus as ProposedMenuItem[][]) : [],
+            );
+            if (!cancelled) {
+              setDynamicRestaurants(built);
+              setPlacesStatus("ready");
+              setPlacesDiag(null);
+            }
+          } else {
+            setDynamicRestaurants(null);
+            setPlacesStatus("fallback");
+            setPlacesDiag({
+              error: typeof json.error === "string" ? json.error : undefined,
+              hint: typeof json.hint === "string" ? json.hint : undefined,
+            });
+          }
         } catch {
           if (!cancelled) {
+            setDynamicRestaurants(null);
+            setPlacesStatus("fallback");
             setPlacesDiag({
-              error: `/api/discover returned invalid JSON (HTTP ${res.status}).`,
-              hint: rawText.slice(0, 160).replace(/\s+/g, " "),
+              error: "Could not reach the restaurant API. Is the FastAPI server running and RESTAURANTS_API_URL set?",
             });
-            json = { data: [] };
           }
-        }
-        if (cancelled) return;
-
-        const rows = json.data;
-        const menus = json.menus;
-        if (Array.isArray(rows) && rows.length > 0) {
-          const built = mergeProposedMenusIntoRestaurants(
-            rows as PlacesApiRestaurantRow[],
-            Array.isArray(menus) ? (menus as ProposedMenuItem[][]) : [],
-          );
-          if (!cancelled) {
-            setDynamicRestaurants(built);
-            setPlacesStatus("ready");
-            setPlacesDiag(null);
-          }
-        } else {
-          setDynamicRestaurants(null);
-          setPlacesStatus("fallback");
-          setPlacesDiag({
-            error: typeof json.error === "string" ? json.error : undefined,
-            hint: typeof json.hint === "string" ? json.hint : undefined,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setDynamicRestaurants(null);
-          setPlacesStatus("fallback");
-          setPlacesDiag({
-            error: "Could not reach the restaurant API. Is the FastAPI server running and RESTAURANTS_API_URL set?",
-          });
         }
       }
 
@@ -478,6 +493,7 @@ export default function SwipingPage() {
       const rows = json.data;
       const menus = json.menus;
       if (Array.isArray(rows) && rows.length > 0) {
+        saveDiscoveryCache(getProfile(), next.contextPrompt, rows, Array.isArray(menus) ? menus as unknown[][] : []);
         const built = mergeProposedMenusIntoRestaurants(
           rows as PlacesApiRestaurantRow[],
           Array.isArray(menus) ? (menus as ProposedMenuItem[][]) : [],

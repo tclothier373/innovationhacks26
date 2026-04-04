@@ -170,6 +170,71 @@ export function setSuggestionDismissLikeCheckpoint(
   _suggestionDismissLikeCheckpoint.set(restaurantId, likeCount);
 }
 
+// ---- Discovery cache ----
+// Stores the last successful /discover result keyed by profile+prompt fingerprint.
+// TTL: 24 hours. Cleared on resetAllGrubrData.
+
+const DISCOVERY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export type DiscoveryCacheEntry = {
+  key: string;
+  rows: unknown[];         // PlacesApiRestaurantRow[]
+  menus: unknown[][];      // ProposedMenuItem[][]
+  savedAt: number;         // Date.now()
+};
+
+function _discoveryCacheKey(profile: GrubrProfile | null, contextPrompt: string): string {
+  const lat = profile?.location ? Math.round(profile.location.lat * 100) / 100 : 0;
+  const lng = profile?.location ? Math.round(profile.location.lng * 100) / 100 : 0;
+  return [
+    contextPrompt.trim().toLowerCase().slice(0, 80),
+    lat,
+    lng,
+    profile?.priceLevel ?? 2,
+    (profile?.favoriteFood ?? "").trim().toLowerCase().slice(0, 40),
+    (profile?.dietaryRestrictions ?? []).slice().sort().join(","),
+  ].join("|");
+}
+
+export function getDiscoveryCache(
+  profile: GrubrProfile | null,
+  contextPrompt: string,
+): DiscoveryCacheEntry | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(`${PREFIX}discovery_cache`);
+  if (!raw) return null;
+  try {
+    const entry = JSON.parse(raw) as DiscoveryCacheEntry;
+    const key = _discoveryCacheKey(profile, contextPrompt);
+    if (entry.key !== key) return null;
+    if (Date.now() - entry.savedAt > DISCOVERY_CACHE_TTL_MS) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDiscoveryCache(
+  profile: GrubrProfile | null,
+  contextPrompt: string,
+  rows: unknown[],
+  menus: unknown[][],
+): void {
+  if (typeof window === "undefined") return;
+  const entry: DiscoveryCacheEntry = {
+    key: _discoveryCacheKey(profile, contextPrompt),
+    rows,
+    menus,
+    savedAt: Date.now(),
+  };
+  window.localStorage.setItem(`${PREFIX}discovery_cache`, JSON.stringify(entry));
+}
+
+export function clearDiscoveryCache(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(`${PREFIX}discovery_cache`);
+}
+
 export function resetAllGrubrData(): void {
   if (typeof window === "undefined") return;
   _suggestionDismissLikeCheckpoint.clear();

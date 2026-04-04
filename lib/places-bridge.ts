@@ -6,6 +6,7 @@ export type ProposedMenuItem = {
   description: string;
   tags?: string[];
   image_url?: string | null;
+  price_cents?: number | null;
 };
 
 /** Row shape from FastAPI `/restaurants` */
@@ -157,6 +158,7 @@ export function mergeProposedMenusIntoRestaurants(
           ? it.tags.map((t) => String(t).toLowerCase().replace(/\s+/g, ""))
           : tagBlob(restaurant.cuisine, it.name),
       imageUrl: it.image_url ?? undefined,
+      priceCents: it.price_cents ?? undefined,
     }));
     return { ...restaurant, items };
   });

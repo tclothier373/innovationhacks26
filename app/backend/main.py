@@ -377,6 +377,7 @@ def _normalize_menu_matrix(
                             if t
                         ][:8],
                         "image_url": it.get("image_url") or None,
+                        "price_cents": it.get("price_cents") or None,
                     }
                 )
         if len(cleaned) < 3:
@@ -672,54 +673,74 @@ def _extract_pdf_text(url: str, headers: dict) -> str:
         return ""
 
 
+def _call_gemini(prompt: str, max_retries: int = 3) -> Optional[dict]:
+    """Call genai then vertex, return first successfully parsed JSON dict.
+    Retries on 429 rate-limit errors using the suggested delay from the error."""
+    import time
+    import re as _re
+
+    for model in [_genai_model, _vertex_model]:
+        if model is None:
+            continue
+        for attempt in range(max_retries):
+            try:
+                r = model.generate_content(
+                    prompt,
+                    generation_config={"response_mime_type": "application/json"},
+                )
+                return _parse_json_from_model(getattr(r, "text", "") or "")
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg:
+                    # Extract suggested retry delay from error message
+                    m = _re.search(r"seconds[\":\s]+(\d+)", msg)
+                    delay = min(int(m.group(1)) + 2 if m else 20, 60)
+                    print(f"[gemini] rate limited (attempt {attempt+1}), retrying in {delay}s", flush=True)
+                    time.sleep(delay)
+                    continue
+                print(f"[gemini] error: {e}", flush=True)
+                break  # non-429 error — try next model
+    return None
+
+
 def _gemini_extract_menu_from_text(
     text_blocks: list[str], restaurant_name: str, cuisine: str
 ) -> list[dict[str, Any]]:
     """
-    Give Gemini page text from a restaurant website and have it extract
-    real food/drink menu items. Returns [] if fewer than 3 found.
+    Pass scraped page text to Gemini and get back specific, orderable menu items with prices.
+    Returns [] if fewer than 3 specific items found.
     """
     if not text_blocks or (_genai_model is None and _vertex_model is None):
         return []
 
     combined = "\n\n--- PAGE BREAK ---\n\n".join(b for b in text_blocks if b.strip())
-    combined = combined[:12000]  # keep tokens sane
+    combined = combined[:12000]
 
-    prompt = f"""You are a menu data extractor. Extract food and drink items from the text below, scraped from the website of "{restaurant_name}" ({cuisine} restaurant).
+    prompt = f"""You are a menu data extractor for a food ordering app. Extract individual food and drink items from the text below, scraped from "{restaurant_name}" ({cuisine} restaurant).
 
 TEXT:
 {combined}
 
-RULES:
-- Only include specific, orderable food or drink items (e.g. "Spicy Tuna Roll", "BBQ Brisket Plate", "House Margarita").
-- Skip: navigation links, hours, addresses, phone numbers, reservation prompts, "About Us", marketing copy, generic section headers like "Appetizers" or "Drinks" that are not themselves a dish name.
-- If a description is present in the text, include it. Otherwise leave description empty.
-- Return up to 8 items, most popular / most prominent first.
-- If you cannot find at least 3 real menu items, return an empty items array.
+STRICT RULES — you MUST follow these exactly:
+1. ONLY include items with a SPECIFIC, UNIQUE name — something a customer would say to order (e.g. "Spicy Tuna Roll", "BBQ Brisket Plate", "House Margarita", "Chicken Tikka Masala").
+2. REJECT anything that is a generic category or section header:
+   - BAD: "House Wines", "Draft Beers", "Seasonal Vegetables", "Selection of Cheeses", "Chef's Selection", "Market Fish", "Soup of the Day", "Desserts", "Starters", "Mains"
+   - GOOD: "Cabernet Sauvignon", "Guinness Stout", "Roasted Broccolini", "Aged Gouda Board", "Pan-Seared Halibut"
+3. If you see a price in the text near the item (e.g. "$18", "18.00"), include it as price_cents (integer cents, e.g. 1800). If no price is visible, use null.
+4. Skip: nav links, hours, addresses, phone, "Reserve Now", "Order Online", "About Us", marketing taglines.
+5. Return 3–8 items. If you cannot find 3 genuinely specific items, return an empty array.
 
 Return ONLY valid JSON:
 {{
   "items": [
-    {{"name": "dish name", "description": "one-line description or empty string"}}
+    {{"name": "specific dish name", "description": "one-line description or empty string", "price_cents": 1500}}
   ]
 }}"""
 
-    parsed: Optional[dict] = None
-    for model in [_genai_model, _vertex_model]:
-        if model is None:
-            continue
-        try:
-            r = model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"},
-            )
-            parsed = _parse_json_from_model(getattr(r, "text", "") or "")
-            break
-        except Exception as e:
-            print(f"[gemini-extract] error: {e}", flush=True)
+    parsed = _call_gemini(prompt)
 
     if not isinstance(parsed, dict):
-        print("[gemini-extract] no LLM available or parse failed", flush=True)
+        print("[gemini-extract] failed or no LLM", flush=True)
         return []
 
     items = parsed.get("items")
@@ -731,14 +752,102 @@ Return ONLY valid JSON:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
-        if not name or len(name) < 2:
+        if not name or len(name) < 3:
             continue
+        price_raw = item.get("price_cents")
+        price_cents: Optional[int] = int(price_raw) if isinstance(price_raw, (int, float)) and price_raw > 0 else None
         result.append({
             "name": name[:120],
             "description": str(item.get("description") or "").strip()[:280],
             "image_url": None,
+            "price_cents": price_cents,
         })
     return result
+
+
+def _gemini_batch_delivery_menus(
+    restaurants: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    """
+    ONE Gemini call for N restaurants. Returns index-aligned list of item arrays.
+    Each restaurant either gets 3–6 specific delivery menu items or an empty list.
+    """
+    if not restaurants or (_genai_model is None and _vertex_model is None):
+        return [[] for _ in restaurants]
+
+    rows = [
+        {"index": i, "name": r.get("name"), "cuisine": r.get("cuisine"), "vicinity": r.get("vicinity")}
+        for i, r in enumerate(restaurants)
+    ]
+
+    prompt = f"""You are a food delivery assistant with training knowledge of restaurant menus.
+
+For each restaurant below, determine if it is available on Grubhub, DoorDash, or Uber Eats, and if so provide 3–5 of its most popular, specific, orderable menu items with approximate prices.
+
+Restaurants:
+{json.dumps(rows, ensure_ascii=False)}
+
+STRICT RULES:
+- Items must be SPECIFIC named dishes a customer would order (e.g. "Tonkotsu Ramen", "Spicy Chicken Sandwich", "Margherita Pizza").
+- REJECT generic terms: "House Wines", "Draft Beers", "Chef's Selection", "Daily Special", "Seasonal Vegetables", "Soup of the Day", "Market Fish".
+- price_cents = integer cents (e.g. $15.00 → 1500). Use null if unknown.
+- If a restaurant is NOT on a delivery app, return an empty items array for it.
+
+Return ONLY valid JSON:
+{{
+  "results": [
+    {{
+      "index": 0,
+      "on_delivery_app": true,
+      "items": [
+        {{"name": "specific dish", "description": "one-line description", "price_cents": 1500}}
+      ]
+    }}
+  ]
+}}
+The "results" array must have exactly {len(restaurants)} entries in the same order as the input."""
+
+    parsed = _call_gemini(prompt)
+    output: list[list[dict[str, Any]]] = [[] for _ in restaurants]
+
+    if not isinstance(parsed, dict):
+        return output
+
+    results = parsed.get("results")
+    if not isinstance(results, list):
+        return output
+
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        idx = entry.get("index")
+        if not isinstance(idx, int) or idx < 0 or idx >= len(restaurants):
+            continue
+        if not entry.get("on_delivery_app"):
+            continue
+        items = entry.get("items") or []
+        if not isinstance(items, list) or len(items) < 3:
+            continue
+        cleaned: list[dict[str, Any]] = []
+        for item in items[:6]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name or len(name) < 3:
+                continue
+            price_raw = item.get("price_cents")
+            price_cents: Optional[int] = int(price_raw) if isinstance(price_raw, (int, float)) and price_raw > 0 else None
+            cleaned.append({
+                "name": name[:120],
+                "description": str(item.get("description") or "").strip()[:280],
+                "image_url": None,
+                "price_cents": price_cents,
+            })
+        if len(cleaned) >= 3:
+            output[idx] = cleaned
+            print(f"[gemini-delivery-batch] '{restaurants[idx].get('name')}' — {len(cleaned)} items", flush=True)
+
+    return output
 
 
 @app.post("/discover")
@@ -773,27 +882,23 @@ async def discover(request: Request):
         return {"data": [], "menus": [], "source": "error", "error": err, "places_status": status}
 
     WANT = _demo_max_restaurants()
-    MAX_CANDIDATES = min(len(places), 15)
+    MAX_CANDIDATES = min(len(places), 8)  # cap to keep Gemini call count low
     candidates = places[:MAX_CANDIDATES]
 
     # Batch-enrich all candidates in one LLM call
     enrichments = enrich_restaurants_batch(candidates)
 
-    accepted_rows: list[dict[str, Any]] = []
-    accepted_menus: list[list[dict[str, Any]]] = []
+    # Intermediate state per candidate
+    # Each entry: {place, enrich, details, scraped_items}
+    candidate_state: list[dict[str, Any]] = []
 
+    # --- Pass 1: fetch details + scrape websites (1 Gemini call per candidate with content) ---
     for i, (place, enrich) in enumerate(zip(candidates, enrichments)):
-        if len(accepted_rows) >= WANT:
-            break
-
         place_id = (place.get("place_id") or "").strip()
         name = (place.get("name") or f"Restaurant {i + 1}").strip()
-
         if not place_id:
-            print(f"[discover] [{i}] '{name}' — no place_id, skipping", flush=True)
             continue
 
-        # Fetch website URL + photo references
         details = await run_in_threadpool(_get_place_details, place_id, PLACES_API_KEY)
         website: Optional[str] = details.get("website")
         photo_refs: list[str] = [
@@ -802,27 +907,59 @@ async def discover(request: Request):
             if p.get("photo_reference")
         ][:3]
 
-        if not website:
-            print(f"[discover] [{i}] '{name}' — no website, skipping", flush=True)
-            continue
-
-        # Scrape website — Gemini extraction is built into _scrape_website_menu
         cuisine_hint = enrich.get("cuisine", "")
-        valid_items = await run_in_threadpool(_scrape_website_menu, website, name, cuisine_hint)
-        print(f"[discover] [{i}] '{name}' — {len(valid_items)} valid items", flush=True)
+        scraped: list[dict[str, Any]] = []
+        if website:
+            scraped = await run_in_threadpool(_scrape_website_menu, website, name, cuisine_hint)
+            print(f"[discover] [{i}] '{name}' — {len(scraped)} items from website", flush=True)
+        else:
+            print(f"[discover] [{i}] '{name}' — no website", flush=True)
+
+        candidate_state.append({
+            "i": i, "place": place, "enrich": enrich,
+            "name": name, "photo_refs": photo_refs, "scraped": scraped,
+        })
+
+    # --- Pass 2: one batch Gemini delivery call for all candidates that need it ---
+    need_fallback = [s for s in candidate_state if len(s["scraped"]) < 3]
+    fallback_menus: list[list[dict[str, Any]]] = []
+    if need_fallback:
+        batch_input = [
+            {
+                "name": s["name"],
+                "cuisine": s["enrich"].get("cuisine", ""),
+                "vicinity": s["place"].get("vicinity") or s["place"].get("formatted_address") or "",
+            }
+            for s in need_fallback
+        ]
+        print(f"[discover] batch delivery lookup for {len(batch_input)} restaurants", flush=True)
+        fallback_menus = await run_in_threadpool(_gemini_batch_delivery_menus, batch_input)
+
+    fallback_iter = iter(fallback_menus)
+
+    # --- Pass 3: accept restaurants with enough items ---
+    accepted_rows: list[dict[str, Any]] = []
+    accepted_menus: list[list[dict[str, Any]]] = []
+
+    for s in candidate_state:
+        if len(accepted_rows) >= WANT:
+            break
+
+        valid_items = s["scraped"]
+        if len(valid_items) < 3:
+            valid_items = next(fallback_iter, [])
 
         if len(valid_items) < 3:
-            print(f"[discover] [{i}] '{name}' — not enough items, skipping", flush=True)
+            print(f"[discover] '{s['name']}' — not enough items, skipping", flush=True)
             continue
 
-        # Resolve photo URLs
+        # Resolve photos
         photo_urls: list[str] = []
-        for ref in photo_refs:
+        for ref in s["photo_refs"]:
             photo_url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
             if photo_url:
                 photo_urls.append(photo_url)
 
-        # Build menu with image assignment
         menu: list[dict[str, Any]] = []
         for j, item in enumerate(valid_items[:5]):
             menu.append({
@@ -830,13 +967,15 @@ async def discover(request: Request):
                 "description": item.get("description") or "Popular pick.",
                 "tags": [],
                 "image_url": item.get("image_url") or (photo_urls[j % len(photo_urls)] if photo_urls else None),
+                "price_cents": item.get("price_cents"),
             })
 
-        # Build restaurant row (same shape as /restaurants)
+        place = s["place"]
+        enrich = s["enrich"]
         geo = (place.get("geometry") or {}).get("location") or {}
         row: dict[str, Any] = {
-            "place_id": place_id,
-            "name": name,
+            "place_id": (place.get("place_id") or "").strip(),
+            "name": s["name"],
             "rating": place.get("rating"),
             "user_ratings_total": place.get("user_ratings_total"),
             "price_level": place.get("price_level"),
@@ -852,7 +991,7 @@ async def discover(request: Request):
 
         accepted_rows.append(row)
         accepted_menus.append(menu)
-        print(f"[discover] [{i}] '{name}' — ACCEPTED ({len(accepted_rows)}/{WANT})", flush=True)
+        print(f"[discover] '{s['name']}' — ACCEPTED ({len(accepted_rows)}/{WANT})", flush=True)
 
     print(f"[discover] done — accepted {len(accepted_rows)} restaurants", flush=True)
     return {
