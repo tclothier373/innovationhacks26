@@ -8,7 +8,7 @@ export function GrubrHeader() {
       initial={{ y: -8, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="sticky top-0 z-50 border-b border-white/15 bg-white/10 backdrop-blur-xl"
+      className="sticky top-0 z-50 border-b border-white/15 bg-brand"
       style={{ WebkitBackdropFilter: "blur(20px)" }}
     >
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
