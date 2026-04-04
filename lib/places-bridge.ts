@@ -1,6 +1,12 @@
 import type { GrubrProfile } from "./grubr-storage";
 import type { FoodItem, Restaurant } from "./mock-food";
 
+export type ProposedMenuItem = {
+  name: string;
+  description: string;
+  tags?: string[];
+};
+
 /** Row shape from FastAPI `/restaurants` */
 export type PlacesApiRestaurantRow = {
   place_id?: string;
@@ -109,4 +115,68 @@ export function mapPlacesApiToRestaurants(rows: PlacesApiRestaurantRow[]): Resta
       items,
     };
   });
+}
+
+function slugPart(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 28)
+      .replace(/(^-|-$)/g, "") || "dish"
+  );
+}
+
+/**
+ * Replace generic placeholder dishes with Gemini-proposed popular items (3–5 per place).
+ * `menus[i]` aligns with `rows[i]` from the Places API.
+ */
+export function mergeProposedMenusIntoRestaurants(
+  rows: PlacesApiRestaurantRow[],
+  menus: ProposedMenuItem[][] | null | undefined,
+): Restaurant[] {
+  const base = mapPlacesApiToRestaurants(rows);
+  if (!menus?.length) return base;
+  return base.map((restaurant, i) => {
+    const proposed = menus[i];
+    if (!proposed?.length) return restaurant;
+    const capped = proposed.slice(0, 5);
+    const items: FoodItem[] = capped.map((it, j) => ({
+      id: `${restaurant.id}::m${j}-${slugPart(it.name)}`,
+      restaurantId: restaurant.id,
+      name: (it.name || `Dish ${j + 1}`).trim().slice(0, 120),
+      description: (it.description || "Popular pick.").trim().slice(0, 280),
+      tags:
+        Array.isArray(it.tags) && it.tags.length
+          ? it.tags.map((t) => String(t).toLowerCase().replace(/\s+/g, ""))
+          : tagBlob(restaurant.cuisine, it.name),
+    }));
+    return { ...restaurant, items };
+  });
+}
+
+/** Load Places rows, then ask the backend for popular menu lines (no Grubhub scraping). */
+export async function fetchPlacesWithProposedMenus(
+  rows: PlacesApiRestaurantRow[],
+): Promise<Restaurant[]> {
+  const base = mapPlacesApiToRestaurants(rows);
+  try {
+    const res = await fetch("/api/menu-proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restaurants: rows }),
+    });
+    const raw = await res.text();
+    let parsed: { menus?: unknown } = {};
+    try {
+      parsed = raw ? (JSON.parse(raw) as { menus?: unknown }) : {};
+    } catch {
+      return base;
+    }
+    const m = parsed.menus;
+    if (!Array.isArray(m)) return base;
+    return mergeProposedMenusIntoRestaurants(rows, m as ProposedMenuItem[][]);
+  } catch {
+    return base;
+  }
 }

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { GrubrProfile } from "@/lib/grubr-storage";
+import { backendUpstreamHeaders, getBackendOrigin } from "@/lib/backend-url";
 import { buildPlacesSearchQuery } from "@/lib/places-bridge";
-
-const DEFAULT_BACKEND = "https://nonvertebral-winter-pronunciative.ngrok-free.dev";
 
 export async function POST(req: NextRequest) {
   let body: { profile?: GrubrProfile | null; contextPrompt?: string };
@@ -16,8 +15,8 @@ export async function POST(req: NextRequest) {
   const contextPrompt = typeof body.contextPrompt === "string" ? body.contextPrompt : "";
   const query = buildPlacesSearchQuery(profile, contextPrompt);
 
-  const base = (DEFAULT_BACKEND).replace(/\/$/, "");
-  const url = new URL("/restaurants", `${base}/`);
+  const origin = getBackendOrigin();
+  const url = new URL("/restaurants", origin.endsWith("/") ? origin : `${origin}/`);
   url.searchParams.set("query", query);
   if (profile?.location) {
     url.searchParams.set("lat", String(profile.location.lat));
@@ -32,18 +31,38 @@ export async function POST(req: NextRequest) {
   try {
     const res = await fetch(url.toString(), {
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      headers: backendUpstreamHeaders(),
     });
-    if (!res.ok) {
+    const text = await res.text();
+    let json: unknown;
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
       return NextResponse.json(
-        { error: `Backend HTTP ${res.status}`, data: [] },
+        {
+          error: `Non-JSON from backend (HTTP ${res.status})`,
+          data: [],
+          hint: text.slice(0, 120).replace(/\s+/g, " "),
+        },
         { status: 502 },
       );
     }
-    const json: unknown = await res.json();
+    if (!res.ok) {
+      const o = json as { error?: string; data?: unknown };
+      return NextResponse.json(
+        {
+          error: o.error ?? `Backend HTTP ${res.status}`,
+          data: Array.isArray(o.data) ? o.data : [],
+        },
+        { status: 502 },
+      );
+    }
     return NextResponse.json(json);
   } catch (e) {
     const message = e instanceof Error ? e.message : "Fetch failed";
-    return NextResponse.json({ error: message, data: [] }, { status: 502 });
+    return NextResponse.json(
+      { error: message, data: [], hint: `Tried ${getBackendOrigin()}` },
+      { status: 502 },
+    );
   }
 }

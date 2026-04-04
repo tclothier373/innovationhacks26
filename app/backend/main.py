@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import json
@@ -43,7 +43,6 @@ _load_root_env()
 # This is NOT the same as a Gemini / AI Studio-only key (AIza... for generative language).
 PLACES_API_KEY = (
     os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
-    or os.getenv("GOOGLES_MAPS_API_KEY", "").strip()  # common typo
     or os.getenv("MAPS_API_KEY", "").strip()
     or os.getenv("GEMINI_API_KEY", "").strip()
 )
@@ -234,3 +233,153 @@ def get_restaurant_data(
     if not results and places_status == "ZERO_RESULTS":
         out["error"] = "No restaurants matched this search (ZERO_RESULTS)."
     return out
+
+
+def _slim_for_menu_prompt(restaurants: list) -> list[dict[str, Any]]:
+    slim: list[dict[str, Any]] = []
+    for i, r in enumerate(restaurants[:8]):
+        if not isinstance(r, dict):
+            continue
+        slim.append(
+            {
+                "index": i,
+                "place_id": r.get("place_id") or "",
+                "name": r.get("name") or "Restaurant",
+                "cuisine": r.get("cuisine"),
+                "main_food": r.get("main_food"),
+            }
+        )
+    return slim
+
+
+def _default_menus_for_slim(slim: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    out: list[list[dict[str, Any]]] = []
+    for s in slim:
+        name = s.get("name") or "this spot"
+        hint = (s.get("main_food") or s.get("cuisine") or "House favorite") or "Chef's pick"
+        c = (s.get("cuisine") or "food").lower().split()
+        tag0 = c[0] if c else "food"
+        out.append(
+            [
+                {
+                    "name": str(hint)[:100],
+                    "description": f"A top seller guests order again and again at {name}.",
+                    "tags": [tag0, "popular"],
+                },
+                {
+                    "name": f"{s.get('cuisine') or 'Signature'} combo plate",
+                    "description": "Mix of best bites — great for trying the menu.",
+                    "tags": [tag0, "combo"],
+                },
+                {
+                    "name": "Sides & refreshment",
+                    "description": "Round out your meal with classics.",
+                    "tags": ["sides"],
+                },
+            ]
+        )
+    return out
+
+
+def _normalize_menu_matrix(
+    menus: Any, slim: list[dict[str, Any]]
+) -> list[list[dict[str, Any]]]:
+    defaults = _default_menus_for_slim(slim)
+    if not isinstance(menus, list):
+        return defaults
+    out: list[list[dict[str, Any]]] = []
+    for i in range(len(slim)):
+        sub = menus[i] if i < len(menus) and isinstance(menus[i], list) else []
+        cleaned: list[dict[str, Any]] = []
+        for it in sub:
+            if isinstance(it, dict) and str(it.get("name", "")).strip():
+                tags = it.get("tags")
+                if not isinstance(tags, list):
+                    tags = []
+                cleaned.append(
+                    {
+                        "name": str(it.get("name", "")).strip()[:120],
+                        "description": str(it.get("description", "")).strip()[:280]
+                        or "Customer favorite.",
+                        "tags": [
+                            str(t).lower().replace(" ", "")[:24]
+                            for t in tags
+                            if t
+                        ][:8],
+                    }
+                )
+        if len(cleaned) < 3:
+            cleaned = defaults[i]
+        out.append(cleaned[:5])
+    return out
+
+
+def _llm_menu_json(slim: list[dict[str, Any]]) -> Optional[dict]:
+    if not slim:
+        return None
+    n = len(slim)
+    prompt = f"""You help a food-ordering discovery app (similar to Grubhub).
+
+For EACH restaurant in the JSON array below (same order), propose **3 to 5** dishes that would typically rank as **most popular / best-selling** on delivery apps or the restaurant's real menu. List **most popular first**.
+
+Restaurants:
+{json.dumps(slim, ensure_ascii=False)}
+
+Rules:
+- Realistic dish names; one appetizing description line each (no prices).
+- Use restaurant **name** and **cuisine**; if the name suggests a known chain, use typical menu knowledge.
+- **tags**: 2-4 short lowercase food keywords per item.
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "menus": [
+    [ {{"name": "string", "description": "string", "tags": ["tag"]}} ],
+    ... exactly {n} inner arrays in the same order as input
+  ]
+}}
+Each inner array must have 3 to 5 items.
+"""
+    if _genai_model is not None:
+        try:
+            r = _genai_model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+            )
+            return _parse_json_from_model(getattr(r, "text", "") or "")
+        except Exception:
+            pass
+    if _vertex_model is not None:
+        try:
+            response = _vertex_model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+            )
+            return _parse_json_from_model(getattr(response, "text", "") or "")
+        except Exception:
+            pass
+    return None
+
+
+@app.post("/menu-proposals")
+async def menu_proposals(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"menus": [], "source": "error"}
+    if not isinstance(payload, dict):
+        return {"menus": [], "source": "error"}
+    restaurants = payload.get("restaurants")
+    if not isinstance(restaurants, list):
+        restaurants = []
+    slim = _slim_for_menu_prompt(restaurants)
+    if not slim:
+        return {"menus": [], "source": "empty"}
+
+    parsed = _llm_menu_json(slim)
+    menus_raw = parsed.get("menus") if isinstance(parsed, dict) else None
+    menus = _normalize_menu_matrix(menus_raw, slim)
+
+    return {
+        "menus": menus,
+        "source": "gemini" if parsed else "default",
+    }

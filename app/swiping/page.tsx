@@ -39,7 +39,7 @@ import {
   type Restaurant,
 } from "@/lib/mock-food";
 import {
-  mapPlacesApiToRestaurants,
+  fetchPlacesWithProposedMenus,
   type PlacesApiRestaurantRow,
 } from "@/lib/places-bridge";
 import { getCuisineVisual } from "@/lib/cuisine-utils";
@@ -383,11 +383,14 @@ export default function SwipingPage() {
 
         const rows = json.data;
         if (Array.isArray(rows) && rows.length > 0) {
-          setDynamicRestaurants(
-            mapPlacesApiToRestaurants(rows as PlacesApiRestaurantRow[]),
+          const built = await fetchPlacesWithProposedMenus(
+            rows as PlacesApiRestaurantRow[],
           );
-          setPlacesStatus("ready");
-          setPlacesDiag(null);
+          if (!cancelled) {
+            setDynamicRestaurants(built);
+            setPlacesStatus("ready");
+            setPlacesDiag(null);
+          }
         } else {
           setDynamicRestaurants(null);
           setPlacesStatus("fallback");
@@ -461,9 +464,10 @@ export default function SwipingPage() {
       }
       const rows = json.data;
       if (Array.isArray(rows) && rows.length > 0) {
-        setDynamicRestaurants(
-          mapPlacesApiToRestaurants(rows as PlacesApiRestaurantRow[]),
+        const built = await fetchPlacesWithProposedMenus(
+          rows as PlacesApiRestaurantRow[],
         );
+        setDynamicRestaurants(built);
         setPlacesStatus("ready");
         setPlacesDiag(null);
       } else {
@@ -729,7 +733,7 @@ export default function SwipingPage() {
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#C82C00]/35 backdrop-blur-[2px]">
               <div className="h-10 w-10 rounded-full border-[3px] border-white/25 border-t-white animate-spin-ring" />
               <p className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-syne)" }}>
-                Grubr Agent is finding restaurants…
+                Grubr Agent is finding restaurants & popular dishes…
               </p>
             </div>
           )}
