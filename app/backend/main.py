@@ -612,139 +612,219 @@ def _full_menu_to_proposed_items(
     return out
 
 
-_GRUBHUB_API_HEADERS = {
-    "Accept": "application/json",
-    "Accept-Language": "en-US,en;q=0.9",
+_GRUBHUB_WEB_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Referer": "https://www.grubhub.com/",
-    "Origin": "https://www.grubhub.com",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
 }
 
 
-def _grubhub_search_restaurant_id(
+def _grubhub_search_restaurant_url(
     name: str,
     address: Optional[str],
     lat: Optional[float],
     lng: Optional[float],
-) -> Optional[int]:
-    """Search Grubhub's API for a restaurant by name + location; return numeric restaurant ID."""
-    params: dict[str, Any] = {
-        "orderMethod": "standard",
-        "locationMode": "DELIVERY",
-        "facetSet": "umamiV2",
-        "pageSize": "5",
-        "hideClosedRestaurantsMode": "semi",
-        "queryText": name,
-    }
-    if lat is not None and lng is not None:
-        params["latitude"] = str(lat)
-        params["longitude"] = str(lng)
-    elif address:
-        params["location"] = address
+) -> Optional[str]:
+    """
+    Search grubhub.com and return the relative restaurant path (/restaurant/slug/id).
+    Parses __NEXT_DATA__ JSON embedded in the search results page.
+    """
+    location = address or (f"{lat},{lng}" if lat is not None and lng is not None else "")
+    params: dict[str, str] = {"queryText": name}
+    if location:
+        params["location"] = location
 
-    print(f"[grubhub-search] querying for '{name}' | address={address!r} lat={lat} lng={lng}", flush=True)
-    print(f"[grubhub-search] params: {params}", flush=True)
-
+    print(f"[grubhub-web] searching www.grubhub.com/search for '{name}' location={location!r}", flush=True)
     try:
-        res = requests.get(
-            "https://api-gtm.grubhub.com/restaurants/search",
+        resp = requests.get(
+            "https://www.grubhub.com/search",
             params=params,
-            headers=_GRUBHUB_API_HEADERS,
-            timeout=15,
+            headers=_GRUBHUB_WEB_HEADERS,
+            timeout=20,
+            allow_redirects=True,
         )
-        print(f"[grubhub-search] HTTP {res.status_code} for '{name}'", flush=True)
-        if not res.ok:
-            print(f"[grubhub-search] non-OK response body (first 500): {res.text[:500]}", flush=True)
+        print(f"[grubhub-web] search HTTP {resp.status_code} final_url={resp.url}", flush=True)
+        if not resp.ok:
+            print(f"[grubhub-web] non-OK: {resp.text[:300]}", flush=True)
             return None
-        data = res.json()
     except Exception as e:
-        print(f"[grubhub-search] request exception for '{name}': {e}", flush=True)
+        print(f"[grubhub-web] search request exception: {e}", flush=True)
         return None
 
-    results = (
-        (data.get("search_result") or {}).get("results") or []
-    )
-    print(f"[grubhub-search] got {len(results)} results for '{name}'", flush=True)
+    html = resp.text
+    # Locate the embedded Next.js data blob
+    m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
+    if not m:
+        print(f"[grubhub-web] no __NEXT_DATA__ in search page (page len={len(html)})", flush=True)
+        # Log first 500 chars to see if it's a bot challenge / redirect
+        print(f"[grubhub-web] page head: {html[:500]!r}", flush=True)
+        return None
 
-    # Pick the result whose name most closely matches
+    raw_json = m.group(1).strip()
+    print(f"[grubhub-web] __NEXT_DATA__ found ({len(raw_json)} chars)", flush=True)
+    try:
+        page_data = json.loads(raw_json)
+    except Exception as e:
+        print(f"[grubhub-web] JSON parse error: {e}", flush=True)
+        return None
+
+    # Navigate the data tree to find restaurant listings
+    # Path varies by Grubhub version; try several known shapes
+    def _dig(obj: Any, *keys: str) -> Any:
+        for k in keys:
+            if not isinstance(obj, dict):
+                return None
+            obj = obj.get(k)
+        return obj
+
+    candidates: list[dict] = []
+    # Shape 1: props.pageProps.searchResults.restaurantList.results
+    r1 = _dig(page_data, "props", "pageProps", "searchResults", "restaurantList", "results")
+    if isinstance(r1, list):
+        candidates = r1
+    # Shape 2: props.pageProps.initialData.searchResults.results
+    if not candidates:
+        r2 = _dig(page_data, "props", "pageProps", "initialData", "searchResults", "results")
+        if isinstance(r2, list):
+            candidates = r2
+    # Shape 3: props.pageProps.restaurants
+    if not candidates:
+        r3 = _dig(page_data, "props", "pageProps", "restaurants")
+        if isinstance(r3, list):
+            candidates = r3
+
+    print(f"[grubhub-web] found {len(candidates)} candidate restaurants in page data", flush=True)
+
     name_lower = name.lower()
-    best_id: Optional[int] = None
+    best_url: Optional[str] = None
     best_score = -1
-    for r in results:
-        rest = r.get("restaurant") if isinstance(r, dict) else None
+
+    for c in candidates:
+        rest = c.get("restaurant") if isinstance(c, dict) else c
         if not isinstance(rest, dict):
             continue
-        rid = rest.get("id")
         rname = str(rest.get("name") or "").lower()
+        slug = rest.get("slug") or rest.get("restaurant_slug") or ""
+        rid = rest.get("restaurant_id") or rest.get("id") or ""
         score = sum(1 for word in name_lower.split() if word in rname)
-        print(f"[grubhub-search]   candidate id={rid} name={rname!r} score={score}", flush=True)
-        if score > best_score:
+        print(f"[grubhub-web]   candidate name={rname!r} slug={slug!r} id={rid} score={score}", flush=True)
+        if score > best_score and (slug or rid):
             best_score = score
-            best_id = rid
+            if slug and rid:
+                best_url = f"/restaurant/{slug}/{rid}"
+            elif slug:
+                best_url = f"/restaurant/{slug}"
 
-    print(f"[grubhub-search] best match for '{name}': id={best_id} score={best_score}", flush=True)
-    return best_id if best_id is not None else None
+    if best_url:
+        print(f"[grubhub-web] best match: {best_url!r} (score={best_score})", flush=True)
+    else:
+        print(f"[grubhub-web] no usable match found for '{name}'", flush=True)
+        # Dump top-level keys so we know where to look next
+        print(f"[grubhub-web] __NEXT_DATA__ top keys: {list(page_data.keys())}", flush=True)
+        props_keys = list((_dig(page_data, "props") or {}).keys())
+        print(f"[grubhub-web] props keys: {props_keys}", flush=True)
+        pp_keys = list((_dig(page_data, "props", "pageProps") or {}).keys())
+        print(f"[grubhub-web] pageProps keys: {pp_keys}", flush=True)
+
+    return best_url
 
 
-def _grubhub_fetch_menu_by_id(
-    restaurant_id: int,
-) -> dict[str, list[dict[str, Any]]]:
-    """Fetch full menu from Grubhub's restaurant detail API by restaurant ID."""
-    print(f"[grubhub-menu] fetching menu for restaurant id={restaurant_id}", flush=True)
+def _grubhub_fetch_menu_from_page(restaurant_path: str) -> dict[str, list[dict[str, Any]]]:
+    """
+    Load a Grubhub restaurant menu page and extract menu items from __NEXT_DATA__.
+    restaurant_path: relative path like /restaurant/some-slug/123456
+    """
+    url = f"https://www.grubhub.com{restaurant_path}"
+    print(f"[grubhub-web] fetching menu page: {url}", flush=True)
     try:
-        res = requests.get(
-            f"https://api-gtm.grubhub.com/restaurants/{restaurant_id}",
-            params={"orderMethod": "standard", "locationMode": "DELIVERY"},
-            headers=_GRUBHUB_API_HEADERS,
-            timeout=15,
-        )
-        print(f"[grubhub-menu] HTTP {res.status_code} for id={restaurant_id}", flush=True)
-        if not res.ok:
-            print(f"[grubhub-menu] non-OK body (first 500): {res.text[:500]}", flush=True)
+        resp = requests.get(url, headers=_GRUBHUB_WEB_HEADERS, timeout=20, allow_redirects=True)
+        print(f"[grubhub-web] menu page HTTP {resp.status_code}", flush=True)
+        if not resp.ok:
             return {}
-        data = res.json()
     except Exception as e:
-        print(f"[grubhub-menu] request exception for id={restaurant_id}: {e}", flush=True)
+        print(f"[grubhub-web] menu page request exception: {e}", flush=True)
         return {}
 
-    restaurant = data.get("restaurant")
-    if not isinstance(restaurant, dict):
-        print(f"[grubhub-menu] 'restaurant' key missing or not a dict. top-level keys: {list(data.keys())}", flush=True)
+    html = resp.text
+    m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
+    if not m:
+        print(f"[grubhub-web] no __NEXT_DATA__ in menu page (page len={len(html)})", flush=True)
+        print(f"[grubhub-web] menu page head: {html[:500]!r}", flush=True)
         return {}
 
-    categories = restaurant.get("menu_category_list") or []
-    print(f"[grubhub-menu] id={restaurant_id} has {len(categories)} menu categories", flush=True)
+    raw_json = m.group(1).strip()
+    print(f"[grubhub-web] menu page __NEXT_DATA__ ({len(raw_json)} chars)", flush=True)
+    try:
+        page_data = json.loads(raw_json)
+    except Exception as e:
+        print(f"[grubhub-web] menu JSON parse error: {e}", flush=True)
+        return {}
+
+    def _dig(obj: Any, *keys: str) -> Any:
+        for k in keys:
+            if not isinstance(obj, dict):
+                return None
+            obj = obj.get(k)
+        return obj
+
+    # Try several known data shapes for the menu
+    menu_categories: list = []
+    # Shape 1: props.pageProps.menu.menuCategories
+    mc1 = _dig(page_data, "props", "pageProps", "menu", "menuCategories")
+    if isinstance(mc1, list):
+        menu_categories = mc1
+    # Shape 2: props.pageProps.initialData.restaurant.menu_category_list
+    if not menu_categories:
+        mc2 = _dig(page_data, "props", "pageProps", "initialData", "restaurant", "menu_category_list")
+        if isinstance(mc2, list):
+            menu_categories = mc2
+    # Shape 3: props.pageProps.restaurant.menu_category_list
+    if not menu_categories:
+        mc3 = _dig(page_data, "props", "pageProps", "restaurant", "menu_category_list")
+        if isinstance(mc3, list):
+            menu_categories = mc3
+
+    print(f"[grubhub-web] found {len(menu_categories)} menu categories", flush=True)
+
+    if not menu_categories:
+        pp_keys = list((_dig(page_data, "props", "pageProps") or {}).keys())
+        print(f"[grubhub-web] pageProps keys for debug: {pp_keys}", flush=True)
+
     full_menu: dict[str, list[dict[str, Any]]] = {}
-    for cat in categories:
+    for cat in menu_categories:
         if not isinstance(cat, dict):
             continue
-        cat_name = str(cat.get("name") or "Menu").strip() or "Menu"
-        items = cat.get("menu_item_list") or []
-        parsed_items: list[dict[str, Any]] = []
+        cat_name = str(cat.get("name") or cat.get("category_name") or "Menu").strip() or "Menu"
+        items = cat.get("menuItems") or cat.get("menu_item_list") or []
+        parsed: list[dict[str, Any]] = []
         for item in items:
             if not isinstance(item, dict):
                 continue
-            item_name = str(item.get("name") or "").strip()
+            item_name = str(item.get("name") or item.get("item_name") or "").strip()
             if not item_name:
                 continue
-            raw_price = item.get("price")
+            raw_price = item.get("price") or item.get("minimum_price_cents")
             price_str = ""
             if isinstance(raw_price, (int, float)) and raw_price > 0:
                 price_str = f"${raw_price / 100:.2f}"
             desc = str(item.get("description") or "").strip()
-            parsed_items.append(
-                {"name": item_name, "price": price_str, "description": desc, "options": {}}
-            )
-        print(f"[grubhub-menu]   category '{cat_name}': {len(parsed_items)} items", flush=True)
-        if parsed_items:
-            full_menu[cat_name] = parsed_items
+            parsed.append({"name": item_name, "price": price_str, "description": desc, "options": {}})
+        print(f"[grubhub-web]   cat '{cat_name}': {len(parsed)} items", flush=True)
+        if parsed:
+            full_menu[cat_name] = parsed
 
-    total_items = sum(len(v) for v in full_menu.values())
-    print(f"[grubhub-menu] id={restaurant_id} total parsed items: {total_items} across {len(full_menu)} categories", flush=True)
+    total = sum(len(v) for v in full_menu.values())
+    print(f"[grubhub-web] total menu items: {total}", flush=True)
     return full_menu
 
 
@@ -754,12 +834,11 @@ def _fetch_grubhub_menu_for_restaurant(
     lat: Optional[float],
     lng: Optional[float],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Search Grubhub for a restaurant by name+location, then return its full menu."""
-    rid = _grubhub_search_restaurant_id(name, address, lat, lng)
-    if rid is None:
-        print(f"[grubhub] no restaurant ID found for '{name}' — skipping menu fetch", flush=True)
+    """Search grubhub.com for a restaurant and scrape its menu from the HTML."""
+    path = _grubhub_search_restaurant_url(name, address, lat, lng)
+    if not path:
         return {}
-    return _grubhub_fetch_menu_by_id(rid)
+    return _grubhub_fetch_menu_from_page(path)
 
 
 def _scrape_grubhub_menu_by_url(url: str) -> dict[str, list[dict[str, Any]]]:
