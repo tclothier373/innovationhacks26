@@ -60,13 +60,9 @@ export default function OnboardingPage() {
         const { latitude: lat, longitude: lng } = pos.coords;
         let label = "Current location";
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-            { headers: { "User-Agent": "Grubr" } }
-          );
+          const res = await fetch(`/api/reverse-geocode?lat=${lat}&lng=${lng}`);
           const data = await res.json();
-          const a = data.address;
-          label = a.city || a.town || a.village || a.county || label;
+          if (data.label) label = data.label;
         } catch {
           // silently fall back to "Current location"
         }
