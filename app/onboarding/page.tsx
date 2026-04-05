@@ -56,8 +56,21 @@ export default function OnboardingPage() {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, label: "Current location" });
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        let label = "Current location";
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+            { headers: { "User-Agent": "Grubr" } }
+          );
+          const data = await res.json();
+          const a = data.address;
+          label = a.city || a.town || a.village || a.county || label;
+        } catch {
+          // silently fall back to "Current location"
+        }
+        setLocation({ lat, lng, label });
         setLocStatus("ok");
       },
       () => {
@@ -257,7 +270,7 @@ export default function OnboardingPage() {
                       {locStatus === "loading" && (
                         <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin-ring" />
                       )}
-                      {locStatus === "ok" ? "📍 Location saved" : locStatus === "loading" ? "Locating…" : "📍 Use my location"}
+                      {locStatus === "ok" ? `📍 ${location?.label ?? "Location saved"}` : locStatus === "loading" ? "Locating…" : "📍 Use my location"}
                     </button>
 
                     {location && (
@@ -377,7 +390,9 @@ export default function OnboardingPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-white/65">Location</span>
-                        <span className="text-xs font-semibold text-white">{locStatus === "ok" ? "Saved" : "Skipped"}</span>
+                        <span className="text-xs font-semibold text-white">
+                          {locStatus === "ok" ? (location?.label ?? "Saved") : "Skipped"}
+                        </span>
                       </div>
                     </div>
 
