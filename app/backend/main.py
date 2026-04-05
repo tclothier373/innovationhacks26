@@ -692,10 +692,14 @@ def _call_gemini(prompt: str, max_retries: int = 3) -> Optional[dict]:
             except Exception as e:
                 msg = str(e)
                 if "429" in msg:
-                    # Extract suggested retry delay from error message
                     m = _re.search(r"seconds[\":\s]+(\d+)", msg)
-                    delay = min(int(m.group(1)) + 2 if m else 20, 60)
-                    print(f"[gemini] rate limited (attempt {attempt+1}), retrying in {delay}s", flush=True)
+                    delay = min(int(m.group(1)) + 2 if m else 15, 45)
+                    # Log exactly which quota metric was violated
+                    metric_m = _re.search(r"quota_metric[\":\s]+\"([^\"]+)\"", msg)
+                    quota_m = _re.search(r"quota_value[\":\s]+(\d+)", msg)
+                    metric = metric_m.group(1) if metric_m else "unknown"
+                    limit = quota_m.group(1) if quota_m else "?"
+                    print(f"[gemini] 429 quota={metric} limit={limit} attempt={attempt+1}/{max_retries} retrying in {delay}s", flush=True)
                     time.sleep(delay)
                     continue
                 print(f"[gemini] error: {e}", flush=True)
@@ -882,18 +886,21 @@ async def discover(request: Request):
         return {"data": [], "menus": [], "source": "error", "error": err, "places_status": status}
 
     WANT = _demo_max_restaurants()
-    MAX_CANDIDATES = min(len(places), 8)  # cap to keep Gemini call count low
+    # Pull more candidates than needed so we can skip ones without menus
+    MAX_CANDIDATES = min(len(places), 12)
     candidates = places[:MAX_CANDIDATES]
 
-    # Batch-enrich all candidates in one LLM call
-    enrichments = enrich_restaurants_batch(candidates)
+    accepted_rows: list[dict[str, Any]] = []
+    accepted_menus: list[list[dict[str, Any]]] = []
+    # Collect candidates that need the batch delivery fallback
+    needs_fallback: list[dict[str, Any]] = []  # {place, name, cuisine, photo_refs}
 
-    # Intermediate state per candidate
-    # Each entry: {place, enrich, details, scraped_items}
-    candidate_state: list[dict[str, Any]] = []
+    # --- Pass 1: scrape websites, stop as soon as we have WANT good results ---
+    # Enrichment is deferred — only called for accepted restaurants (saves 1 call if all succeed via website)
+    for i, place in enumerate(candidates):
+        if len(accepted_rows) >= WANT:
+            break
 
-    # --- Pass 1: fetch details + scrape websites (1 Gemini call per candidate with content) ---
-    for i, (place, enrich) in enumerate(zip(candidates, enrichments)):
         place_id = (place.get("place_id") or "").strip()
         name = (place.get("name") or f"Restaurant {i + 1}").strip()
         if not place_id:
@@ -907,91 +914,105 @@ async def discover(request: Request):
             if p.get("photo_reference")
         ][:3]
 
-        cuisine_hint = enrich.get("cuisine", "")
+        # Cheaply infer cuisine from Places types (no Gemini needed for scraping)
+        types = place.get("types") or []
+        skip_types = {"point_of_interest", "establishment", "food", "restaurant"}
+        cuisine_hint = next((t.replace("_", " ").title() for t in types if t not in skip_types), "Restaurant")
+
         scraped: list[dict[str, Any]] = []
         if website:
             scraped = await run_in_threadpool(_scrape_website_menu, website, name, cuisine_hint)
-            print(f"[discover] [{i}] '{name}' — {len(scraped)} items from website", flush=True)
+            print(f"[discover] [{i}] '{name}' — {len(scraped)} items from website scrape", flush=True)
         else:
-            print(f"[discover] [{i}] '{name}' — no website", flush=True)
+            print(f"[discover] [{i}] '{name}' — no website, queuing for fallback", flush=True)
 
-        candidate_state.append({
-            "i": i, "place": place, "enrich": enrich,
-            "name": name, "photo_refs": photo_refs, "scraped": scraped,
-        })
+        if len(scraped) >= 3:
+            # Resolve photos
+            photo_urls: list[str] = []
+            for ref in photo_refs:
+                photo_url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
+                if photo_url:
+                    photo_urls.append(photo_url)
 
-    # --- Pass 2: one batch Gemini delivery call for all candidates that need it ---
-    need_fallback = [s for s in candidate_state if len(s["scraped"]) < 3]
-    fallback_menus: list[list[dict[str, Any]]] = []
-    if need_fallback:
+            # Lazy enrich just this one restaurant (1 call per accepted restaurant)
+            enrich = enrich_restaurants_batch([place])[0]
+
+            menu: list[dict[str, Any]] = []
+            for j, item in enumerate(scraped[:5]):
+                menu.append({
+                    "name": item["name"],
+                    "description": item.get("description") or "Popular pick.",
+                    "tags": [],
+                    "image_url": item.get("image_url") or (photo_urls[j % len(photo_urls)] if photo_urls else None),
+                    "price_cents": item.get("price_cents"),
+                })
+
+            geo = (place.get("geometry") or {}).get("location") or {}
+            accepted_rows.append({
+                "place_id": place_id, "name": name,
+                "rating": place.get("rating"), "user_ratings_total": place.get("user_ratings_total"),
+                "price_level": place.get("price_level"), "types": place.get("types"),
+                "vicinity": place.get("vicinity"), "formatted_address": place.get("formatted_address"),
+                "lat": geo.get("lat"), "lng": geo.get("lng"),
+                "cuisine": enrich.get("cuisine"), "main_food": enrich.get("main_food"),
+                "price_range": enrich.get("price_range"),
+            })
+            accepted_menus.append(menu)
+            print(f"[discover] '{name}' — ACCEPTED via website ({len(accepted_rows)}/{WANT})", flush=True)
+        else:
+            needs_fallback.append({"place": place, "place_id": place_id, "name": name,
+                                   "cuisine": cuisine_hint, "photo_refs": photo_refs})
+
+    # --- Pass 2: batch Gemini knowledge call for remaining slots ---
+    still_need = WANT - len(accepted_rows)
+    if still_need > 0 and needs_fallback:
         batch_input = [
             {
                 "name": s["name"],
-                "cuisine": s["enrich"].get("cuisine", ""),
+                "cuisine": s["cuisine"],
                 "vicinity": s["place"].get("vicinity") or s["place"].get("formatted_address") or "",
             }
-            for s in need_fallback
+            for s in needs_fallback[:still_need + 3]  # ask for a few extra in case some return empty
         ]
-        print(f"[discover] batch delivery lookup for {len(batch_input)} restaurants", flush=True)
+        print(f"[discover] batch delivery lookup for {len(batch_input)} restaurants (need {still_need} more)", flush=True)
         fallback_menus = await run_in_threadpool(_gemini_batch_delivery_menus, batch_input)
 
-    fallback_iter = iter(fallback_menus)
+        for s, fb_menu in zip(needs_fallback, fallback_menus):
+            if len(accepted_rows) >= WANT:
+                break
+            if len(fb_menu) < 3:
+                continue
 
-    # --- Pass 3: accept restaurants with enough items ---
-    accepted_rows: list[dict[str, Any]] = []
-    accepted_menus: list[list[dict[str, Any]]] = []
+            photo_urls_fb: list[str] = []
+            for ref in s["photo_refs"]:
+                photo_url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
+                if photo_url:
+                    photo_urls_fb.append(photo_url)
 
-    for s in candidate_state:
-        if len(accepted_rows) >= WANT:
-            break
+            enrich = enrich_restaurants_batch([s["place"]])[0]
 
-        valid_items = s["scraped"]
-        if len(valid_items) < 3:
-            valid_items = next(fallback_iter, [])
+            menu = []
+            for j, item in enumerate(fb_menu[:5]):
+                menu.append({
+                    "name": item["name"],
+                    "description": item.get("description") or "Popular pick.",
+                    "tags": [],
+                    "image_url": item.get("image_url") or (photo_urls_fb[j % len(photo_urls_fb)] if photo_urls_fb else None),
+                    "price_cents": item.get("price_cents"),
+                })
 
-        if len(valid_items) < 3:
-            print(f"[discover] '{s['name']}' — not enough items, skipping", flush=True)
-            continue
-
-        # Resolve photos
-        photo_urls: list[str] = []
-        for ref in s["photo_refs"]:
-            photo_url = await run_in_threadpool(_resolve_photo_url, ref, PLACES_API_KEY)
-            if photo_url:
-                photo_urls.append(photo_url)
-
-        menu: list[dict[str, Any]] = []
-        for j, item in enumerate(valid_items[:5]):
-            menu.append({
-                "name": item["name"],
-                "description": item.get("description") or "Popular pick.",
-                "tags": [],
-                "image_url": item.get("image_url") or (photo_urls[j % len(photo_urls)] if photo_urls else None),
-                "price_cents": item.get("price_cents"),
+            geo = (s["place"].get("geometry") or {}).get("location") or {}
+            accepted_rows.append({
+                "place_id": s["place_id"], "name": s["name"],
+                "rating": s["place"].get("rating"), "user_ratings_total": s["place"].get("user_ratings_total"),
+                "price_level": s["place"].get("price_level"), "types": s["place"].get("types"),
+                "vicinity": s["place"].get("vicinity"), "formatted_address": s["place"].get("formatted_address"),
+                "lat": geo.get("lat"), "lng": geo.get("lng"),
+                "cuisine": enrich.get("cuisine"), "main_food": enrich.get("main_food"),
+                "price_range": enrich.get("price_range"),
             })
-
-        place = s["place"]
-        enrich = s["enrich"]
-        geo = (place.get("geometry") or {}).get("location") or {}
-        row: dict[str, Any] = {
-            "place_id": (place.get("place_id") or "").strip(),
-            "name": s["name"],
-            "rating": place.get("rating"),
-            "user_ratings_total": place.get("user_ratings_total"),
-            "price_level": place.get("price_level"),
-            "types": place.get("types"),
-            "vicinity": place.get("vicinity"),
-            "formatted_address": place.get("formatted_address"),
-            "lat": geo.get("lat"),
-            "lng": geo.get("lng"),
-            "cuisine": enrich.get("cuisine"),
-            "main_food": enrich.get("main_food"),
-            "price_range": enrich.get("price_range"),
-        }
-
-        accepted_rows.append(row)
-        accepted_menus.append(menu)
-        print(f"[discover] '{s['name']}' — ACCEPTED ({len(accepted_rows)}/{WANT})", flush=True)
+            accepted_menus.append(menu)
+            print(f"[discover] '{s['name']}' — ACCEPTED via fallback ({len(accepted_rows)}/{WANT})", flush=True)
 
     print(f"[discover] done — accepted {len(accepted_rows)} restaurants", flush=True)
     return {
