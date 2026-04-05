@@ -119,19 +119,29 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
   }, [commit, x]);
 
   return (
-    <div className="flex w-full max-w-[520px] flex-col items-center gap-5">
+    <div className="relative flex w-full max-w-[540px] flex-col items-center gap-6">
+      {/* Soft spotlight behind the card */}
+      <div
+        className="pointer-events-none absolute left-1/2 top-6 -z-10 h-[min(420px,70vh)] w-[min(100%,500px)] -translate-x-1/2 rounded-[3.5rem] bg-gradient-to-b from-white/[0.14] via-white/[0.05] to-transparent blur-2xl"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute -bottom-8 left-1/2 -z-10 h-32 w-[90%] max-w-md -translate-x-1/2 rounded-full bg-black/20 blur-3xl"
+        aria-hidden
+      />
+
       {/* Card */}
-      <div className="relative w-full px-3 pt-2">
+      <div className="relative w-full px-2 pt-1 sm:px-3 sm:pt-2">
         {/* Pass / Like ghost labels */}
         <motion.div
           style={{ opacity: passOpacity }}
-          className="pointer-events-none absolute left-0 top-1/3 z-20 ml-6 rounded-xl border-2 border-red-400 bg-red-50 px-4 py-1.5 text-sm font-extrabold tracking-widest text-red-500 uppercase rotate-[-12deg]"
+          className="pointer-events-none absolute left-0 top-1/3 z-20 ml-4 rounded-2xl border border-red-400/60 bg-red-50/95 px-4 py-2 text-xs font-extrabold tracking-[0.2em] text-red-600 uppercase shadow-lg shadow-red-900/10 backdrop-blur-sm rotate-[-12deg] sm:ml-6 sm:text-sm"
         >
           Pass
         </motion.div>
         <motion.div
           style={{ opacity: likeOpacity }}
-          className="pointer-events-none absolute right-0 top-1/3 z-20 mr-6 rounded-xl border-2 border-green-500 bg-green-50 px-4 py-1.5 text-sm font-extrabold tracking-widest text-green-600 uppercase rotate-[12deg]"
+          className="pointer-events-none absolute right-0 top-1/3 z-20 mr-4 rounded-2xl border border-emerald-500/60 bg-emerald-50/95 px-4 py-2 text-xs font-extrabold tracking-[0.2em] text-emerald-700 uppercase shadow-lg shadow-emerald-900/10 backdrop-blur-sm rotate-[12deg] sm:mr-6 sm:text-sm"
         >
           Like
         </motion.div>
@@ -147,16 +157,19 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
           transition={transitionIn}
           style={{ x, rotate }}
           whileDrag={{ scale: 1.025, cursor: "grabbing" }}
-          className="relative cursor-grab touch-pan-y overflow-hidden rounded-[2rem] bg-white shadow-[0_32px_72px_-12px_rgba(80,20,0,0.22),0_8px_24px_-4px_rgba(80,20,0,0.10)] will-change-transform active:cursor-grabbing"
+          className="relative cursor-grab touch-pan-y overflow-hidden rounded-[2rem] bg-white shadow-[0_40px_90px_-20px_rgba(80,20,0,0.28),0_16px_40px_-12px_rgba(255,85,0,0.12),0_1px_0_rgba(255,255,255,0.9)_inset] ring-1 ring-white/40 will-change-transform active:cursor-grabbing"
         >
           {/* Food hero area */}
           <div className={`relative h-60 overflow-hidden ${item.imageUrl ? "bg-black" : `bg-gradient-to-br ${visual.gradient}`}`}>
+            {item.imageUrl && (
+              <div className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-t from-black/25 via-transparent to-black/10" aria-hidden />
+            )}
             {item.imageUrl ? (
               /* Real food photo from Places API / restaurant website */
               <img
                 src={item.imageUrl}
                 alt={item.name}
-                className="absolute inset-0 h-full w-full object-cover opacity-90"
+                className="absolute inset-0 h-full w-full object-cover opacity-92"
                 draggable={false}
               />
             ) : (
@@ -178,37 +191,37 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
             )}
 
             {/* Cuisine pill — always visible */}
-            <div className="absolute bottom-4 left-4">
-              <span className="rounded-full border border-white/50 bg-white/75 px-3 py-1 text-xs font-bold uppercase tracking-wider text-gray-800 backdrop-blur-sm">
+            <div className="absolute bottom-4 left-4 z-[2]">
+              <span className="rounded-full border border-white/55 bg-white/88 px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-i0 shadow-md shadow-black/10 backdrop-blur-md">
                 {restaurant.cuisine}
               </span>
             </div>
           </div>
 
           {/* Card body */}
-          <div className="px-6 py-5 text-gray-900">
+          <div className="border-t border-b1/40 bg-gradient-to-b from-white to-s1/30 px-6 py-5 text-gray-900">
             {/* Restaurant row */}
-            <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <p
-                className="text-sm font-extrabold uppercase tracking-[0.14em] text-[#FF5500]"
+                className="text-sm font-extrabold uppercase tracking-[0.14em] text-brand"
                 style={{ fontFamily: "var(--font-syne)" }}
               >
                 {restaurant.name}
               </p>
               <div className="flex items-center gap-1.5">
                 <StarRow value={restaurant.stars} />
-                <span className="text-sm font-bold text-gray-800">{restaurant.stars.toFixed(1)}</span>
-                <span className="text-xs text-gray-400">({restaurant.reviewCount})</span>
+                <span className="text-sm font-bold text-i0">{restaurant.stars.toFixed(1)}</span>
+                <span className="text-xs text-i3">({restaurant.reviewCount})</span>
               </div>
             </div>
 
             <h3
-              className="text-2xl font-extrabold leading-snug tracking-tight text-gray-900"
+              className="text-2xl font-extrabold leading-snug tracking-tight text-i0"
               style={{ fontFamily: "var(--font-syne)" }}
             >
               {item.name}
             </h3>
-            <p className="mt-2 text-sm leading-relaxed text-gray-600">
+            <p className="mt-2 text-sm leading-relaxed text-i2">
               {item.description}
             </p>
           </div>
@@ -216,43 +229,48 @@ function SwipeDeck({ item, restaurant, onComplete }: SwipeDeckProps) {
       </div>
 
       {/* Emoji rating strip */}
-      <div className="flex w-full flex-col items-center gap-3">
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-oo-s">
-          Rate to advance
-        </p>
+      <div className="w-full max-w-[460px] rounded-[1.75rem] border border-white/18 bg-white/[0.08] p-5 shadow-[0_20px_56px_-18px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-md">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex w-full flex-col items-center gap-1">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/55">
+              Rate to advance
+            </p>
+            <span className="h-px w-12 bg-gradient-to-r from-transparent via-white/35 to-transparent" aria-hidden />
+          </div>
 
-        <div className="flex w-full max-w-[420px] items-end justify-between gap-2">
-          {EMOJI_RATINGS.map(({ rating, emoji, label, color }, i) => (
-            <motion.button
-              key={rating}
-              type="button"
-              aria-label={label}
-              title={label}
-              initial={{ opacity: 0, y: 18, scale: 0.8 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ delay: 0.08 + i * 0.04, ...SPRING }}
-              whileHover={{
-                y: -7,
-                scale: 1.18,
-                transition: { type: "spring", stiffness: 600, damping: 22 },
-              }}
-              whileTap={{ scale: 0.88 }}
-              onClick={() => void commit(rating, rating >= 4)}
-              className="flex flex-col items-center gap-1 group"
-            >
-              <div
-                className={`flex h-[62px] w-[62px] items-center justify-center rounded-2xl bg-gradient-to-br ${color} shadow-md shadow-black/10 ring-1 ring-black/5 transition-all group-hover:shadow-xl`}
+          <div className="flex w-full max-w-[420px] items-end justify-between gap-1.5 sm:gap-2">
+            {EMOJI_RATINGS.map(({ rating, emoji, label, color }, i) => (
+              <motion.button
+                key={rating}
+                type="button"
+                aria-label={label}
+                title={label}
+                initial={{ opacity: 0, y: 18, scale: 0.8 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ delay: 0.08 + i * 0.04, ...SPRING }}
+                whileHover={{
+                  y: -7,
+                  scale: 1.18,
+                  transition: { type: "spring", stiffness: 600, damping: 22 },
+                }}
+                whileTap={{ scale: 0.88 }}
+                onClick={() => void commit(rating, rating >= 4)}
+                className="group flex flex-col items-center gap-1.5"
               >
-                <span className="text-3xl select-none">{emoji}</span>
-              </div>
-              <span className="text-[10px] font-semibold tracking-wide text-oo-s uppercase">
-                {label}
-              </span>
-            </motion.button>
-          ))}
-        </div>
+                <div
+                  className={`flex h-[58px] w-[58px] items-center justify-center rounded-2xl bg-gradient-to-br ${color} shadow-lg shadow-black/20 ring-1 ring-white/25 transition-all group-hover:shadow-xl group-hover:ring-white/40 sm:h-[62px] sm:w-[62px]`}
+                >
+                  <span className="select-none text-[1.65rem] sm:text-3xl">{emoji}</span>
+                </div>
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-white/50 sm:text-[10px]">
+                  {label}
+                </span>
+              </motion.button>
+            ))}
+          </div>
 
-        <p className="text-[11px] text-oo-xs">or drag the card left / right</p>
+          <p className="text-[10px] text-white/40">or drag the card left / right</p>
+        </div>
       </div>
     </div>
   );
@@ -665,43 +683,59 @@ export default function SwipingPage() {
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.06, ...SPRING }}
-          className="hidden lg:flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-r border-white/10 px-6 py-7"
+          className="hidden min-h-0 w-[min(20.5rem,100%)] shrink-0 flex-col py-4 pl-4 pr-1 sm:pl-5 sm:pr-2 lg:flex"
         >
+          <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto rounded-[2rem] border border-white/40 bg-gradient-to-b from-white/95 via-s1 to-s2/65 px-6 py-7 shadow-[0_24px_56px_-16px_rgba(0,0,0,0.28),0_8px_24px_-8px_rgba(255,85,0,0.12),inset_0_1px_0_rgba(255,255,255,0.9)] ring-1 ring-white/60 backdrop-blur-lg">
           {/* Header */}
-          <div>
-            <p
-              className="text-xl font-extrabold text-white"
-              style={{ fontFamily: "var(--font-syne)" }}
-            >
-              For You
-            </p>
-            <p className="mt-1 text-sm text-white/65">
-              Restaurants Grubr thinks you&apos;ll love
-            </p>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full bg-gradient-to-br from-brand-lt to-brand-dk shadow-[0_0_0_3px_rgba(255,85,0,0.12)]"
+                aria-hidden
+              />
+              <p
+                className="text-[11px] font-bold uppercase tracking-[0.22em] text-brand"
+              >
+                Personalized
+              </p>
+            </div>
+            <div>
+              <p
+                className="bg-gradient-to-r from-i0 to-i1 bg-clip-text text-2xl font-extrabold tracking-tight text-transparent"
+                style={{ fontFamily: "var(--font-syne)" }}
+              >
+                For You
+              </p>
+              <p className="mt-1.5 max-w-[16rem] text-sm leading-relaxed text-i2">
+                Restaurants Grubr thinks you&apos;ll love
+              </p>
+            </div>
           </div>
 
           {/* Status card */}
           {suggestions.length === 0 ? (
-            <div className="flex flex-col gap-4 rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
-              <span className="text-4xl">🎯</span>
+            <div className="flex flex-col gap-4 rounded-3xl border border-b1/70 bg-white/85 p-5 shadow-[0_4px_24px_-6px_rgba(255,85,0,0.09),0_1px_0_rgba(255,255,255,0.8)_inset] ring-1 ring-white/60 backdrop-blur-sm">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-s3 to-s2 text-3xl shadow-inner shadow-b1/30">
+                🎯
+              </span>
               <div>
-                <p className="text-base font-bold text-white">Discovering your taste…</p>
-                <p className="mt-2 text-sm leading-relaxed text-white/75">
+                <p className="text-base font-bold text-i0">Discovering your taste…</p>
+                <p className="mt-2 text-sm leading-relaxed text-i2">
                   Like {LIKES_THRESHOLD_SUGGEST}+ dishes from the same spot and we&apos;ll suggest that restaurant here with a notification.
                 </p>
               </div>
             </div>
           ) : pendingSuggestion ? (
-            <div className="rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
-              <p className="text-base font-bold text-white">👀 Heads up</p>
-              <p className="mt-2 text-sm leading-relaxed text-white/75">
+            <div className="rounded-3xl border border-b1/70 bg-white/85 p-5 shadow-[0_4px_24px_-6px_rgba(255,85,0,0.09)] ring-1 ring-white/60 backdrop-blur-sm">
+              <p className="text-base font-bold text-i0">👀 Heads up</p>
+              <p className="mt-2 text-sm leading-relaxed text-i2">
                 A restaurant suggestion just slid in from the right — auto-hides in ~10 s.
               </p>
             </div>
           ) : (
-            <div className="rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
-              <p className="text-base font-bold text-white">👍 Snoozed</p>
-              <p className="mt-2 text-sm leading-relaxed text-white/75">
+            <div className="rounded-3xl border border-b1/70 bg-white/85 p-5 shadow-[0_4px_24px_-6px_rgba(255,85,0,0.09)] ring-1 ring-white/60 backdrop-blur-sm">
+              <p className="text-base font-bold text-i0">👍 Snoozed</p>
+              <p className="mt-2 text-sm leading-relaxed text-i2">
                 Keep swiping. Like {LIKES_THRESHOLD_SUGGEST} more dishes from the same place and we&apos;ll nudge you again.
               </p>
             </div>
@@ -709,10 +743,14 @@ export default function SwipingPage() {
 
           {/* Interest meter */}
           {Object.keys(swipeState.restaurantLikes).length > 0 && (
-            <div className="rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
-              <p className="mb-4 text-xs font-bold uppercase tracking-widest text-white/50">
-                Interest meter
-              </p>
+            <div className="rounded-3xl border border-b1/70 bg-white/85 p-5 shadow-[0_4px_24px_-6px_rgba(255,85,0,0.07)] ring-1 ring-white/60 backdrop-blur-sm">
+              <div className="mb-4 flex items-center gap-2">
+                <span className="h-px flex-1 bg-gradient-to-r from-transparent via-b2/60 to-transparent" aria-hidden />
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-i3">
+                  Interest meter
+                </p>
+                <span className="h-px flex-1 bg-gradient-to-r from-transparent via-b2/60 to-transparent" aria-hidden />
+              </div>
               <div className="space-y-5">
                 {Object.entries(swipeState.restaurantLikes).map(([id, count]) => {
                   const r = getRestaurantById(id);
@@ -721,15 +759,15 @@ export default function SwipingPage() {
                   const reached = count >= LIKES_THRESHOLD_SUGGEST;
                   return (
                     <div key={id}>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-semibold text-white truncate">{r.name}</span>
-                        <span className={`text-sm font-bold ml-2 shrink-0 ${reached ? "text-white" : "text-white/60"}`}>
-                          {count} / {LIKES_THRESHOLD_SUGGEST}
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-semibold text-i0">{r.name}</span>
+                        <span className={`ml-2 shrink-0 tabular-nums text-xs font-bold ${reached ? "text-brand" : "text-i3"}`}>
+                          {count}/{LIKES_THRESHOLD_SUGGEST}
                         </span>
                       </div>
-                      <div className="h-2.5 w-full rounded-full bg-white/15 overflow-hidden">
+                      <div className="h-2.5 w-full overflow-hidden rounded-full bg-s3/90 shadow-[inset_0_1px_2px_rgba(26,9,0,0.06)] ring-1 ring-b1/40">
                         <motion.div
-                          className={`h-full rounded-full ${reached ? "bg-white" : "bg-white/55"}`}
+                          className={`h-full rounded-full shadow-sm ${reached ? "bg-gradient-to-r from-brand-lt to-brand" : "bg-gradient-to-r from-brand-lt/70 to-brand/55"}`}
                           initial={{ width: 0 }}
                           animate={{ width: `${pct}%` }}
                           transition={{ duration: 0.5, ease: "easeOut" }}
@@ -742,14 +780,15 @@ export default function SwipingPage() {
             </div>
           )}
 
-          <div className="mt-auto">
+          <div className="mt-auto pt-2">
             <button
               type="button"
               onClick={handleReset}
-              className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-sm font-semibold text-white/80 backdrop-blur-md transition-colors hover:bg-white/16"
+              className="w-full rounded-2xl border border-b2/35 bg-white/70 px-4 py-3.5 text-sm font-semibold text-i2 shadow-sm transition-all hover:border-brand/25 hover:bg-brand/[0.04] hover:text-i1 hover:shadow-md active:scale-[0.99]"
             >
               Reset data & memory
             </button>
+          </div>
           </div>
         </motion.aside>
 
@@ -758,54 +797,73 @@ export default function SwipingPage() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.02, ...SPRING }}
-          className="relative flex flex-1 min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-4"
+          className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-6 sm:px-8"
         >
+          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
+            <div className="absolute -top-32 left-1/2 h-[min(480px,55vh)] w-[min(100%,640px)] -translate-x-1/2 rounded-full bg-white/[0.07] blur-3xl" />
+            <div className="absolute bottom-0 left-1/2 h-40 w-[min(90%,520px)] -translate-x-1/2 rounded-full bg-[#5C0F00]/25 blur-3xl" />
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+          </div>
+
+          <div className="relative z-[1] flex min-h-full w-full flex-1 flex-col items-center justify-center">
           {placesStatus === "loading" && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#C82C00]/35 backdrop-blur-[2px]">
-              <div className="h-10 w-10 rounded-full border-[3px] border-white/25 border-t-white animate-spin-ring" />
-              <p className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-syne)" }}>
-                Grubr Agent is finding restaurants & popular dishes…
-              </p>
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#9B2000]/25 p-4 backdrop-blur-[3px]">
+              <div className="flex max-w-sm flex-col items-center gap-5 rounded-3xl border border-white/25 bg-white/[0.12] px-10 py-9 text-center shadow-[0_24px_64px_-16px_rgba(0,0,0,0.45)] backdrop-blur-lg">
+                <div className="relative">
+                  <div className="absolute inset-0 rounded-full bg-white/20 blur-xl" aria-hidden />
+                  <div className="relative h-11 w-11 rounded-full border-[3px] border-white/20 border-t-white animate-spin-ring" />
+                </div>
+                <p className="text-sm font-semibold leading-relaxed text-white/95" style={{ fontFamily: "var(--font-syne)" }}>
+                  Grubr Agent is finding restaurants & popular dishes…
+                </p>
+                <p className="text-[11px] text-white/45">This usually takes a few seconds</p>
+              </div>
             </div>
           )}
           {placesStatus === "fallback" && (
-            <div className="absolute top-2 left-1/2 z-10 max-w-lg -translate-x-1/2 rounded-2xl border border-white/20 bg-black/35 px-4 py-2.5 text-left text-[11px] text-white/90 backdrop-blur-md">
-              <p className="font-semibold text-white">Using sample restaurants</p>
-              {placesDiag?.error && (
-                <p className="mt-1 text-white/80">{placesDiag.error}</p>
-              )}
-              {placesDiag?.hint && (
-                <p className="mt-1 text-white/70">{placesDiag.hint}</p>
-              )}
-              {!placesDiag?.error && (
-                <p className="mt-1 text-white/75">
-                  Start the FastAPI app, set{" "}
-                  <code className="rounded bg-white/10 px-1">RESTAURANTS_API_URL</code> in{" "}
-                  <code className="rounded bg-white/10 px-1">.env.local</code>, and use a{" "}
-                  <strong className="font-semibold text-white">Maps Places–enabled</strong> key as{" "}
-                  <code className="rounded bg-white/10 px-1">GOOGLE_MAPS_API_KEY</code> in the repo{" "}
-                  <code className="rounded bg-white/10 px-1">.env</code> (Gemini-only keys do not work for Places).
-                </p>
-              )}
+            <div className="absolute top-3 left-1/2 z-10 max-w-lg -translate-x-1/2 px-2 sm:top-5">
+              <div className="rounded-3xl border border-white/22 bg-black/40 px-4 py-3 text-left text-[11px] text-white/90 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.5)] backdrop-blur-md ring-1 ring-white/10 sm:px-5 sm:py-3.5">
+                <p className="font-semibold text-white">Using sample restaurants</p>
+                {placesDiag?.error && (
+                  <p className="mt-1.5 text-white/80">{placesDiag.error}</p>
+                )}
+                {placesDiag?.hint && (
+                  <p className="mt-1.5 text-white/70">{placesDiag.hint}</p>
+                )}
+                {!placesDiag?.error && (
+                  <p className="mt-1.5 text-white/75">
+                    Start the FastAPI app, set{" "}
+                    <code className="rounded-md bg-white/12 px-1.5 py-0.5">RESTAURANTS_API_URL</code> in{" "}
+                    <code className="rounded-md bg-white/12 px-1.5 py-0.5">.env.local</code>, and use a{" "}
+                    <strong className="font-semibold text-white">Maps Places–enabled</strong> key as{" "}
+                    <code className="rounded-md bg-white/12 px-1.5 py-0.5">GOOGLE_MAPS_API_KEY</code> in the repo{" "}
+                    <code className="rounded-md bg-white/12 px-1.5 py-0.5">.env</code> (Gemini-only keys do not work for Places).
+                  </p>
+                )}
+              </div>
             </div>
           )}
           {!current || !restaurant ? (
             <motion.div
-              className="flex flex-col items-center gap-3 text-center"
+              className="flex max-w-sm flex-col items-center gap-5 rounded-3xl border border-white/20 bg-white/[0.09] px-8 py-10 text-center shadow-[0_28px_72px_-20px_rgba(0,0,0,0.4)] backdrop-blur-lg ring-1 ring-white/10"
               initial={{ opacity: 0, scale: 0.94 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={SPRING}
             >
-              <span className="text-5xl">🎉</span>
-              <p
-                className="text-2xl font-extrabold text-white"
-                style={{ fontFamily: "var(--font-syne)" }}
-              >
-                You&apos;re caught up
-              </p>
-              <p className="max-w-xs text-sm text-oo-m">
-                Adjust Food Mood or clear seen dishes to keep swiping.
-              </p>
+              <span className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-2xl bg-white/15 text-4xl shadow-inner shadow-black/10">
+                🎉
+              </span>
+              <div className="space-y-2">
+                <p
+                  className="bg-gradient-to-b from-white to-white/75 bg-clip-text text-2xl font-extrabold text-transparent"
+                  style={{ fontFamily: "var(--font-syne)" }}
+                >
+                  You&apos;re caught up
+                </p>
+                <p className="max-w-xs text-sm leading-relaxed text-white/75">
+                  Adjust Food Mood or clear seen dishes to keep swiping.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -814,7 +872,7 @@ export default function SwipingPage() {
                   setQueue(filterItemsByPrompt(prev.contextPrompt, getProfile()));
                   setIndex(0);
                 }}
-                className="rounded-full bg-white px-7 py-2.5 text-sm font-bold text-brand shadow-xl transition-all hover:bg-s2 active:scale-[0.97]"
+                className="rounded-full bg-gradient-to-b from-white to-s1 px-8 py-3 text-sm font-bold text-brand shadow-[0_8px_28px_-6px_rgba(0,0,0,0.35)] ring-1 ring-white/50 transition-all hover:shadow-[0_12px_36px_-8px_rgba(255,85,0,0.35)] hover:ring-white active:scale-[0.97]"
               >
                 Show dishes again
               </button>
@@ -827,6 +885,7 @@ export default function SwipingPage() {
               onComplete={handleSwipeComplete}
             />
           )}
+          </div>
         </motion.section>
 
         {/* RIGHT — Food Mood (desktop only) */}
@@ -834,18 +893,33 @@ export default function SwipingPage() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.08, ...SPRING }}
-          className="hidden lg:flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-white/10 px-5 py-6"
+          className="hidden min-h-0 w-[min(20.5rem,100%)] shrink-0 flex-col py-4 pr-4 pl-1 sm:pr-5 sm:pl-2 lg:flex"
         >
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.20em] text-oo-s mb-1">
-              Food Mood
-            </p>
-            <p className="text-xs text-oo-xs">
-              Describe what you&apos;re craving — Grubr adjusts what you see in real time.
-            </p>
+          <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto rounded-[2rem] border border-white/40 bg-gradient-to-b from-white/95 via-s1 to-s2/65 px-6 py-7 shadow-[0_24px_56px_-16px_rgba(0,0,0,0.28),0_8px_24px_-8px_rgba(255,85,0,0.12),inset_0_1px_0_rgba(255,255,255,0.9)] ring-1 ring-white/60 backdrop-blur-lg">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full bg-gradient-to-br from-brand-lt to-brand-dk shadow-[0_0_0_3px_rgba(255,85,0,0.12)]"
+                aria-hidden
+              />
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-brand">
+                Live context
+              </p>
+            </div>
+            <div>
+              <p
+                className="text-xl font-extrabold tracking-tight text-i0"
+                style={{ fontFamily: "var(--font-syne)" }}
+              >
+                Food Mood
+              </p>
+              <p className="mt-1.5 max-w-[16rem] text-xs leading-relaxed text-i2">
+                Describe what you&apos;re craving — Grubr adjusts what you see in real time.
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-col overflow-hidden rounded-2xl border border-oo-xs bg-gl backdrop-blur-xl">
+          <div className="flex flex-col overflow-hidden rounded-3xl border border-b1/70 bg-white/90 shadow-[0_8px_32px_-10px_rgba(255,85,0,0.12),0_1px_0_rgba(255,255,255,0.9)_inset] ring-1 ring-white/70 transition-shadow focus-within:shadow-[0_12px_40px_-10px_rgba(255,85,0,0.16),0_0_0_3px_rgba(255,85,0,0.08)] focus-within:ring-brand/20">
             <textarea
               value={promptDraft}
               onChange={(e) => setPromptDraft(e.target.value)}
@@ -857,14 +931,14 @@ export default function SwipingPage() {
               }}
               placeholder={"\"I'm feeling Mediterranean tonight\"\n\"No Mexican food today\"\n\"Something spicy and cheap\"\n\"Craving something warm\""}
               rows={7}
-              className="w-full resize-none bg-transparent px-4 py-4 text-sm text-white placeholder:text-oo-xs outline-none leading-relaxed"
+              className="w-full resize-none bg-transparent px-4 py-4 text-sm leading-relaxed text-i0 outline-none placeholder:text-i3/90"
             />
-            <div className="border-t border-oo-xs px-3 py-3">
+            <div className="border-t border-b1/60 bg-gradient-to-b from-s1/90 to-s2/40 px-3 py-3">
               <button
                 type="button"
                 disabled={contextRefreshing}
                 onClick={() => void applyPrompt()}
-                className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-brand shadow-md transition-all hover:bg-s2 active:scale-[0.98] disabled:opacity-60"
+                className="w-full rounded-xl bg-gradient-to-b from-white to-s1 py-2.5 text-sm font-bold text-brand shadow-[0_2px_8px_-2px_rgba(255,85,0,0.25)] ring-1 ring-b1/80 transition-all hover:shadow-[0_4px_16px_-4px_rgba(255,85,0,0.35)] hover:ring-brand/25 active:scale-[0.98] disabled:opacity-60"
               >
                 {contextRefreshing ? "Updating…" : "Update context ↵"}
               </button>
@@ -873,23 +947,25 @@ export default function SwipingPage() {
 
           {/* Stats */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-oo-xs bg-gl p-4 text-center backdrop-blur-md">
-              <p className="text-2xl font-extrabold text-white" style={{ fontFamily: "var(--font-syne)" }}>
+            <div className="relative overflow-hidden rounded-3xl border border-b1/70 bg-white/80 p-4 text-center shadow-sm ring-1 ring-white/50">
+              <div className="pointer-events-none absolute inset-x-3 top-0 h-0.5 rounded-full bg-gradient-to-r from-transparent via-brand/45 to-transparent" aria-hidden />
+              <p className="text-2xl font-extrabold tabular-nums text-brand" style={{ fontFamily: "var(--font-syne)" }}>
                 {swipeState.seenItemIds.length}
               </p>
-              <p className="text-[11px] text-oo-s mt-0.5">Dishes seen</p>
+              <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-i3">Dishes seen</p>
             </div>
-            <div className="rounded-2xl border border-oo-xs bg-gl p-4 text-center backdrop-blur-md">
-              <p className="text-2xl font-extrabold text-white" style={{ fontFamily: "var(--font-syne)" }}>
+            <div className="relative overflow-hidden rounded-3xl border border-b1/70 bg-white/80 p-4 text-center shadow-sm ring-1 ring-white/50">
+              <div className="pointer-events-none absolute inset-x-3 top-0 h-0.5 rounded-full bg-gradient-to-r from-transparent via-brand/45 to-transparent" aria-hidden />
+              <p className="text-2xl font-extrabold tabular-nums text-brand" style={{ fontFamily: "var(--font-syne)" }}>
                 {Object.values(swipeState.restaurantLikes).reduce((a, b) => a + b, 0)}
               </p>
-              <p className="text-[11px] text-oo-s mt-0.5">Dishes liked</p>
+              <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-i3">Dishes liked</p>
             </div>
           </div>
 
           {/* Prompt examples */}
-          <div className="rounded-2xl border border-oo-xs bg-gl p-4 backdrop-blur-md">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-oo-s mb-3">
+          <div className="rounded-3xl border border-b1/70 bg-white/75 p-4 shadow-sm ring-1 ring-white/50 backdrop-blur-sm">
+            <p className="mb-3.5 text-[10px] font-bold uppercase tracking-[0.18em] text-i3">
               Try saying…
             </p>
             <div className="space-y-2">
@@ -903,12 +979,15 @@ export default function SwipingPage() {
                   key={ex}
                   type="button"
                   onClick={() => { setPromptDraft(ex); }}
-                  className="block w-full rounded-xl border border-oo-xs bg-white/5 px-3 py-2 text-left text-xs text-oo-m transition-colors hover:bg-white/10"
+                  className="block w-full rounded-2xl border border-transparent bg-white/90 px-3.5 py-2.5 text-left text-xs font-medium text-i1 shadow-sm transition-all hover:border-brand/20 hover:bg-s0 hover:shadow-md active:scale-[0.99]"
                 >
-                  &ldquo;{ex}&rdquo;
+                  <span className="text-i3/80">&ldquo;</span>
+                  {ex}
+                  <span className="text-i3/80">&rdquo;</span>
                 </button>
               ))}
             </div>
+          </div>
           </div>
         </motion.aside>
       </div>
