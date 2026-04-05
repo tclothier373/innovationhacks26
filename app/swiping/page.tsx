@@ -48,6 +48,91 @@ import {
 import { getCuisineVisual } from "@/lib/cuisine-utils";
 import { useIsClient } from "@/lib/use-is-client";
 
+const DISCOVERY_BLURBS = [
+  { emoji: "🍽️", text: "Fetching your dream restaurant…" },
+  { emoji: "🧠", text: "Consulting the food oracle…" },
+  { emoji: "🔍", text: "Sniffing out the good stuff…" },
+  { emoji: "⚙️", text: "Crunching the heavy numbers…" },
+  { emoji: "📖", text: "Reading menus so you don't have to…" },
+  { emoji: "🤖", text: "Asking Gemini for its hot takes…" },
+  { emoji: "🗺️", text: "Scouting your neighborhood…" },
+  { emoji: "🌶️", text: "Taste-testing the algorithm…" },
+  { emoji: "💅", text: "Curating only the finest options…" },
+  { emoji: "🧑‍🍳", text: "Negotiating with local chefs…" },
+];
+
+function DiscoveryLoader() {
+  const [idx, setIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const cycle = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIdx((i) => (i + 1) % DISCOVERY_BLURBS.length);
+        setVisible(true);
+      }, 350);
+    }, 2600);
+    return () => clearInterval(cycle);
+  }, []);
+
+  const blurb = DISCOVERY_BLURBS[idx];
+
+  return (
+    <motion.div
+      key="discovery-loader"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8"
+      style={{ background: "linear-gradient(135deg, #C82C00 0%, #FF5500 50%, #ff7a33 100%)" }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      {/* Orb accents */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-white/10 blur-3xl animate-orb-a" />
+        <div className="absolute -bottom-16 -right-16 h-56 w-56 rounded-full bg-black/15 blur-3xl animate-orb-b" />
+      </div>
+
+      {/* Logo */}
+      <p className="relative text-2xl font-extrabold tracking-tight text-white/90" style={{ fontFamily: "var(--font-syne)" }}>
+        grubr
+      </p>
+
+      {/* Spinning ring */}
+      <motion.div
+        className="relative h-20 w-20 rounded-full border-[3px] border-white/20 border-t-white"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+      />
+
+      {/* Cycling blurb */}
+      <div className="relative flex flex-col items-center gap-2 text-center">
+        <motion.span
+          key={`emoji-${idx}`}
+          className="text-4xl"
+          initial={{ opacity: 0, scale: 0.6 }}
+          animate={{ opacity: visible ? 1 : 0, scale: visible ? 1 : 0.6 }}
+          transition={{ duration: 0.3 }}
+        >
+          {blurb.emoji}
+        </motion.span>
+        <motion.p
+          key={`text-${idx}`}
+          className="text-base font-semibold text-white"
+          style={{ fontFamily: "var(--font-syne)" }}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: visible ? 1 : 0, y: visible ? 0 : -6 }}
+          transition={{ duration: 0.3 }}
+        >
+          {blurb.text}
+        </motion.p>
+        <p className="text-xs text-white/60">This may take up to 30 seconds</p>
+      </div>
+    </motion.div>
+  );
+}
+
 const EMOJI_RATINGS = [
   { rating: 1, emoji: "😞", label: "Skip", color: "from-slate-100 to-slate-200" },
   { rating: 2, emoji: "😕", label: "Meh",  color: "from-orange-50 to-amber-100" },
@@ -654,6 +739,9 @@ export default function SwipingPage() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
+      <AnimatePresence>
+        {(placesStatus === "loading" || contextRefreshing) && <DiscoveryLoader />}
+      </AnimatePresence>
       {toastLayer}
 
       <GrubrHeader />
@@ -760,14 +848,6 @@ export default function SwipingPage() {
           transition={{ delay: 0.02, ...SPRING }}
           className="relative flex flex-1 min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-4"
         >
-          {placesStatus === "loading" && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#C82C00]/35 backdrop-blur-[2px]">
-              <div className="h-10 w-10 rounded-full border-[3px] border-white/25 border-t-white animate-spin-ring" />
-              <p className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-syne)" }}>
-                Grubr Agent is finding restaurants & popular dishes…
-              </p>
-            </div>
-          )}
           {placesStatus === "fallback" && (
             <div className="absolute top-2 left-1/2 z-10 max-w-lg -translate-x-1/2 rounded-2xl border border-white/20 bg-black/35 px-4 py-2.5 text-left text-[11px] text-white/90 backdrop-blur-md">
               <p className="font-semibold text-white">Using sample restaurants</p>
